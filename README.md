@@ -106,7 +106,7 @@ npm start
    - **Manage Topics** (if your group uses Forum Topics)
 3. In each chat, an administrator must run `/subscribe owner/repo` for every repository whose notifications it should receive. A new chat receives no repository events by default. For an organization repository, use its full name, such as `/subscribe my-org/api`.
 
-Before subscribing, the operator must add the chat ID and approved repositories to `CHAT_REPO_ALLOWLIST` in `.env`, for example `CHAT_REPO_ALLOWLIST={"-100123456789":["my-org/api","other-org/web"]}`. `/status` shows the chat ID. To permit any repository under one organization for that chat, use `"my-org/*"` in the allowlist; chat administrators still subscribe to individual repositories. Restart the bot after changing `.env`.
+For broad visibility, the operator can set `PUBLIC_REPO_ALLOWLIST=public-org/*,another-org/website` in `.env`. Any group admin may then subscribe their group to an individual approved repository. For restricted repositories, use `CHAT_REPO_ALLOWLIST={"-100123456789":["private-org/api"]}` instead; `/status` shows the chat ID. Restart the bot after changing `.env`.
 
 ### Step 3: Assign Topics (Inside Group Topics)
 
@@ -148,7 +148,7 @@ Or open the interactive UI:
 4. Click **Add webhook**.
 5. GitHub will send a test `ping` event. A subscribed chat will receive a connection message.
 
-The allowlist controls which repository events each chat may receive, including chats with subscriptions saved by older versions. This deployment uses one JSON file and one long-polling bot process; do not run multiple replicas against the same data directory or bot token.
+The allowlists control which repository events each chat may receive, including chats with subscriptions saved by older versions. Add only repositories intended for every group to `PUBLIC_REPO_ALLOWLIST`. This deployment uses one JSON file and one long-polling bot process; do not run multiple replicas against the same data directory or bot token.
 
 ---
 
