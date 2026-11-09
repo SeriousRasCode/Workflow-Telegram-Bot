@@ -36,7 +36,7 @@ export interface ChatSettings {
   chatId: number;
   chatTitle: string;
   isForum?: boolean;
-  subscribedRepos: string[]; // ['owner/repo', ...] or ['*'] for all
+  subscribedRepos: string[]; // Explicit owner/repo subscriptions
   topics: ChatTopicSettings;
   topicNames: Record<string, string>; // threadId -> topic title
   eventsEnabled: ChatEventsEnabled;
@@ -49,5 +49,6 @@ export interface ChatSettings {
 
 export interface StoreData {
   chats: Record<string, ChatSettings>; // key: chatId string
+  deliveries?: Record<string, Record<string, number>>; // delivery ID -> chat ID -> timestamp
   version: number;
 }
