@@ -179,9 +179,9 @@ The Cloudflare version uses Telegram webhooks and a D1 database. Its settings ar
 2. Run `npx wrangler d1 migrations apply workflow-telegram-bot --remote`.
 3. Deploy with `npx wrangler deploy --secrets-file .secrets.json`. The secret file must contain `TELEGRAM_BOT_TOKEN` and a random `TELEGRAM_WEBHOOK_SECRET`; never commit it.
 4. Set the Telegram webhook to `<worker-url>/telegram`, passing `TELEGRAM_WEBHOOK_SECRET` as `secret_token`. Use the Telegram Bot API `setWebhook` method.
-5. In a group or channel, run `/status` to get its chat ID. In a private chat with the bot, run `/connect <chat-id> <organization>`. The bot returns a unique GitHub webhook URL and secret. Configure that webhook in the GitHub organization and wait for its ping event. Then run `/subscribe <organization/repo>` in the group, or `/subscribe <chat-id> <organization/repo>` in the private chat.
+5. In a group or channel, run `/status` to get its chat ID. In a private chat with the bot, run `/connect <chat-id> <owner/repo>` for one repository, or `/connect <chat-id> <organization>` for an entire organization. The bot returns a unique GitHub webhook URL and secret. Add the webhook to that repository or organization and wait for GitHub's ping event. Then run `/subscribe <owner/repo>` in the group, or `/subscribe <chat-id> <owner/repo>` in the private chat.
 
-The Cloudflare bot also supports `/disconnect <organization>`, `/toggle_event <event>`, `/verbosity <compact|detailed>`, and `/silent <on|off>`. In a private chat, prefix setting commands with the target chat ID. An organization owner must configure the GitHub webhook; a group admin alone cannot receive real-time events from an organization they do not manage.
+The Cloudflare bot also supports `/disconnect <organization|owner/repo>`, `/toggle_event <event>`, `/verbosity <compact|detailed>`, and `/silent <on|off>`. In a private chat, prefix setting commands with the target chat ID. A repository administrator can configure a repository webhook, including for a personal repository. An organization owner can configure an organization webhook covering multiple repositories.
 
 Each chat has its own organization connection and webhook secret. The Cloudflare version queues notifications in D1 and sends them in batches; its free-tier limits and Telegram rate limits still apply.
 
