@@ -11,6 +11,7 @@ export interface BotConfig {
   dataDir: string;
   defaultVerbosity: 'compact' | 'detailed';
   chatRepoAllowlist: Record<string, string[]>;
+  publicRepoAllowlist: string[];
 }
 
 export const config: BotConfig = {
@@ -21,6 +22,7 @@ export const config: BotConfig = {
   dataDir: process.env.DATA_DIR || path.join(process.cwd(), 'data'),
   defaultVerbosity: (process.env.DEFAULT_VERBOSITY === 'compact' ? 'compact' : 'detailed'),
   chatRepoAllowlist: JSON.parse(process.env.CHAT_REPO_ALLOWLIST || '{}'),
+  publicRepoAllowlist: (process.env.PUBLIC_REPO_ALLOWLIST || '').split(',').map((repo) => repo.trim()).filter(Boolean),
 };
 
 export function validateConfig(): void {
@@ -33,5 +35,8 @@ export function validateConfig(): void {
   if (!config.chatRepoAllowlist || typeof config.chatRepoAllowlist !== 'object' || Array.isArray(config.chatRepoAllowlist) ||
       Object.values(config.chatRepoAllowlist).some((repos) => !Array.isArray(repos) || repos.some((repo) => typeof repo !== 'string'))) {
     throw new Error('CHAT_REPO_ALLOWLIST must be a JSON object mapping chat IDs to repository lists');
+  }
+  if (config.publicRepoAllowlist.some((repo) => !/^[A-Za-z0-9][A-Za-z0-9-]*\/(\*|[A-Za-z0-9._-]+)$/.test(repo))) {
+    throw new Error('PUBLIC_REPO_ALLOWLIST must contain owner/repo or owner/* entries');
   }
 }
