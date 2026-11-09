@@ -199,7 +199,7 @@ export function registerBotCommands(bot: Bot): void {
     const args = ctx.message?.text?.split(/\s+/).slice(1) || [];
     const repoArg = args[0];
 
-    if (!repoArg || !repoArg.includes('/')) {
+    if (!repoArg || !/^[A-Za-z0-9][A-Za-z0-9-]*\/[A-Za-z0-9._-]+$/.test(repoArg) || repoArg.includes('..')) {
       await ctx.reply(
         `⚠️ <b>Usage:</b> <code>/subscribe &lt;owner/repo&gt;</code>\nExample: <code>/subscribe torvalds/linux</code>`,
         { parse_mode: 'HTML' }
