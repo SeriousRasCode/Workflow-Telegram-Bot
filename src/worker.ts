@@ -65,6 +65,10 @@ export function connectionMatches(scope: string, payload: { organization?: { log
   return String(payload.organization?.login || repo.split('/')[0] || '').toLowerCase() === scope;
 }
 
+export function isChannelPost(update: TgUpdate): boolean {
+  return update.channel_post?.chat.type === 'channel';
+}
+
 async function handleTelegram(request: Request, env: Env): Promise<Response> {
   if (request.headers.get('X-Telegram-Bot-Api-Secret-Token') !== env.TELEGRAM_WEBHOOK_SECRET) return reply('Unauthorized', 401);
   const update = await request.json() as TgUpdate;
@@ -102,9 +106,10 @@ async function handleTelegram(request: Request, env: Env): Promise<Response> {
     await respond(`<b>${command === '/status' ? 'Connection status' : 'Settings'}</b>\n\n<b>Chat ID:</b> <code>${chat.id}</code>\n\n<b>Connections</b>\n${connections}\n\n<b>Subscribed repositories</b>\n${repos}\n\n<b>Next step:</b> ${owners.results.length ? 'Use <code>/subscribe owner/repo</code> after the connection shows ✅.' : `Message me privately: <code>/connect ${chat.id} owner/repo</code> (one repo) or <code>/connect ${chat.id} organization</code> (all repos in an organization).`}`, true);
     return reply('ok');
   }
-  if (!userId) return reply('ok');
+  const channelCommand = isChannelPost(update);
+  if (!userId && !channelCommand) return reply('ok');
   if (isPrivate && targetId === chat.id) { await respond('Send <code>/status</code> in your group or channel to get its chat ID. Then try <code>/connect CHAT_ID owner/repo</code> here.', true); return reply('ok'); }
-  if (!(await admin(env, target, userId))) { await respond('Only chat administrators can change these settings.'); return reply('ok'); }
+  if (!channelCommand && !(await admin(env, target, userId!))) { await respond('Only chat administrators can change these settings.'); return reply('ok'); }
   const settings = await getSettings(env, target);
 
   if (command === '/connect') {
@@ -132,7 +137,13 @@ async function handleTelegram(request: Request, env: Env): Promise<Response> {
     if (!repoPattern.test(repo) || repo.includes('..')) { await respond('Usage: /subscribe <owner/repo>'); return reply('ok'); }
     const owner = repo.split('/')[0];
     const conn = await env.DB.prepare('SELECT verified FROM connections WHERE chat_id=? AND owner IN (?,?) AND verified=1 LIMIT 1').bind(String(targetId), owner, repo).first<{ verified: number }>();
-    if (!conn?.verified) { await respond(`<b>One step first</b>\n\nMessage me privately: <code>/connect ${targetId} ${escape(repo)}</code>\n\nI’ll give you the GitHub webhook URL and secret. After GitHub verifies it, send <code>/subscribe ${escape(repo)}</code> again.`, true); return reply('ok'); }
+    if (!conn?.verified) {
+      const pending = await env.DB.prepare('SELECT owner FROM connections WHERE chat_id=? AND owner IN (?,?) LIMIT 1').bind(String(targetId), owner, repo).first();
+      await respond(pending
+        ? `<b>Webhook waiting for GitHub</b>\n\nThe connection for <code>${escape(repo)}</code> is saved, but GitHub has not verified it yet. Add the webhook URL and secret I sent in our private chat to the repository’s <b>Settings → Webhooks</b>. GitHub will send a ping. Then try <code>/subscribe ${escape(repo)}</code> again.`
+        : `<b>Connect this repository first</b>\n\nMessage me privately: <code>/connect ${targetId} ${escape(repo)}</code>\n\nI’ll send its GitHub webhook URL and secret.`, true);
+      return reply('ok');
+    }
     await env.DB.prepare('INSERT OR IGNORE INTO subscriptions(chat_id,repo) VALUES(?,?)').bind(String(targetId), repo).run();
     if (!settings.subscribedRepos.includes(repo)) settings.subscribedRepos.push(repo);
     await saveSettings(env, settings);
