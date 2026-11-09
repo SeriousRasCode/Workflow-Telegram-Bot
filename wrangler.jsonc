@@ -1,0 +1,14 @@
+{
+  "$schema": "node_modules/wrangler/config-schema.json",
+  "name": "workflow-telegram-bot",
+  "main": "src/worker.ts",
+  "compatibility_date": "2026-11-09",
+  "triggers": { "crons": ["* * * * *"] },
+  "d1_databases": [
+    {
+      "binding": "DB",
+      "database_name": "workflow-telegram-bot",
+      "database_id": "5f0eb591-ea34-4a05-b8fe-dcf89690e0bb"
+    }
+  ]
+}
