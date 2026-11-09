@@ -1,0 +1,9 @@
+node_modules/
+dist/
+data/
+data_test/
+.env
+*.log
+npm-debug.log*
+.DS_Store
+Thumbs.db
