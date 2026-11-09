@@ -10,6 +10,7 @@ interface RequestWithRawBody extends Request {
 
 export function createServer(): express.Express {
   const app = express();
+  const inFlight = new Map<string, Promise<number>>();
 
   // Save raw body buffer for HMAC signature verification
   app.use(
@@ -42,6 +43,10 @@ export function createServer(): express.Express {
       res.status(400).json({ error: 'Missing X-GitHub-Event header' });
       return;
     }
+    if (!deliveryId || !/^[0-9a-fA-F-]{36}$/.test(deliveryId)) {
+      res.status(400).json({ error: 'Missing or invalid X-GitHub-Delivery header' });
+      return;
+    }
 
     // Verify HMAC SHA-256 signature
     const rawBody = req.rawBody || Buffer.from(JSON.stringify(req.body));
@@ -67,7 +72,17 @@ export function createServer(): express.Express {
         return;
       }
 
-      const deliveredCount = await broadcastGitHubEvent(dispatched);
+      let pending = inFlight.get(deliveryId);
+      if (!pending) {
+        pending = broadcastGitHubEvent(dispatched, deliveryId);
+        inFlight.set(deliveryId, pending);
+      }
+      let deliveredCount: number;
+      try {
+        deliveredCount = await pending;
+      } finally {
+        if (inFlight.get(deliveryId) === pending) inFlight.delete(deliveryId);
+      }
 
       res.status(200).json({
         status: 'success',
