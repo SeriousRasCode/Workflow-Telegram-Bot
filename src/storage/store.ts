@@ -16,8 +16,7 @@ const DEFAULT_EVENTS_ENABLED: ChatEventsEnabled = {
 
 export class SettingsStore {
   private filePath: string;
-  private data: StoreData = { chats: {}, version: 1 };
-  private saveTimeout: NodeJS.Timeout | null = null;
+  private data: StoreData = { chats: {}, deliveries: {}, version: 2 };
 
   constructor(dataDir: string = config.dataDir) {
     if (!fs.existsSync(dataDir)) {
@@ -35,10 +34,14 @@ export class SettingsStore {
         if (!this.data.chats) {
           this.data.chats = {};
         }
+        this.data.deliveries ||= {};
+        // Earlier versions subscribed every chat to every repository implicitly.
+        for (const chat of Object.values(this.data.chats)) {
+          chat.subscribedRepos = (chat.subscribedRepos || []).filter((repo) => repo !== '*');
+        }
       }
     } catch (err) {
-      console.error('Failed to load settings file, initializing clean store:', err);
-      this.data = { chats: {}, version: 1 };
+      throw new Error(`Failed to load settings file ${this.filePath}`, { cause: err });
     }
   }
 
@@ -48,7 +51,7 @@ export class SettingsStore {
       fs.writeFileSync(tempPath, JSON.stringify(this.data, null, 2), 'utf-8');
       fs.renameSync(tempPath, this.filePath);
     } catch (err) {
-      console.error('Failed to save settings:', err);
+      throw new Error(`Failed to save settings file ${this.filePath}`, { cause: err });
     }
   }
 
@@ -60,7 +63,7 @@ export class SettingsStore {
         chatId,
         chatTitle,
         isForum,
-        subscribedRepos: ['*'], // Default to all webhooks sent to this bot instance
+        subscribedRepos: [],
         topics: {},
         topicNames: {},
         eventsEnabled: { ...DEFAULT_EVENTS_ENABLED },
@@ -96,11 +99,25 @@ export class SettingsStore {
     return Object.values(this.data.chats);
   }
 
+  public wasDelivered(deliveryId: string, chatId: number): boolean {
+    return Boolean(this.data.deliveries?.[deliveryId]?.[chatId]);
+  }
+
+  public recordDelivery(deliveryId: string, chatId: number): void {
+    const deliveries = this.data.deliveries ||= {};
+    deliveries[deliveryId] ||= {};
+    deliveries[deliveryId][chatId] = Date.now();
+    const cutoff = Date.now() - 7 * 24 * 60 * 60 * 1000;
+    for (const [id, chats] of Object.entries(deliveries)) {
+      if (Object.values(chats).every((time) => time < cutoff)) delete deliveries[id];
+    }
+    this.save();
+  }
+
   public getChatsForRepo(repoFullName: string): ChatSettings[] {
     const lowerRepo = repoFullName.toLowerCase();
     return this.getAllChats().filter((chat) => {
       return (
-        chat.subscribedRepos.includes('*') ||
         chat.subscribedRepos.some((r) => r.toLowerCase() === lowerRepo)
       );
     });
@@ -153,14 +170,11 @@ export class SettingsStore {
   public subscribeRepo(chatId: number, repoFullName: string): boolean {
     const chat = this.getOrCreateChat(chatId);
     const cleaned = repoFullName.trim();
+    if (!/^[A-Za-z0-9][A-Za-z0-9-]*\/[A-Za-z0-9._-]+$/.test(cleaned) || cleaned.includes('..')) {
+      throw new Error('Repository must be in owner/repo format');
+    }
     if (!chat.subscribedRepos.some((r) => r.toLowerCase() === cleaned.toLowerCase())) {
-      // If user had wildcard '*', we can keep or replace depending on preference
-      // Here, if they add a specific repo, remove '*' if present and it's their first explicit repo
-      if (chat.subscribedRepos.length === 1 && chat.subscribedRepos[0] === '*') {
-        chat.subscribedRepos = [cleaned];
-      } else {
-        chat.subscribedRepos.push(cleaned);
-      }
+      chat.subscribedRepos.push(cleaned);
       chat.updatedAt = new Date().toISOString();
       this.save();
       return true;
@@ -173,10 +187,6 @@ export class SettingsStore {
     const cleaned = repoFullName.trim().toLowerCase();
     const prevLength = chat.subscribedRepos.length;
     chat.subscribedRepos = chat.subscribedRepos.filter((r) => r.toLowerCase() !== cleaned);
-    if (chat.subscribedRepos.length === 0) {
-      // If none left, default back to wildcard or empty
-      chat.subscribedRepos = [];
-    }
     if (chat.subscribedRepos.length !== prevLength) {
       chat.updatedAt = new Date().toISOString();
       this.save();
