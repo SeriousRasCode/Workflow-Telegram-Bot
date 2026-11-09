@@ -48,6 +48,7 @@ describe('Store and Topic Routing', () => {
 
   test.beforeEach(() => {
     config.chatRepoAllowlist = { '-100123456789': ['facebook/react', 'my-org/*'] };
+    config.publicRepoAllowlist = ['public-org/*'];
     if (fs.existsSync(testDir)) {
       fs.rmSync(testDir, { recursive: true, force: true });
     }
@@ -106,6 +107,8 @@ describe('Store and Topic Routing', () => {
     assert.equal(store.getChatsForRepo('other/private').length, 0);
     assert.throws(() => store.subscribeRepo(-100123456789, 'other/private'), /not approved/);
     assert.equal(store.subscribeRepo(-100123456789, 'my-org/api'), true);
+    assert.equal(store.subscribeRepo(-100123456789, 'public-org/website'), true);
+    assert.equal(store.getChatsForRepo('public-org/website').length, 1);
 
     // Unsubscribe
     const removed = store.unsubscribeRepo(-100123456789, 'facebook/react');
