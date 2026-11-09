@@ -13,9 +13,8 @@ export function verifyGitHubSignature(
   rawBody: Buffer | string,
   secret: string = config.webhookSecret
 ): boolean {
-  // If no secret configured in the bot, skip verification (with warning)
   if (!secret) {
-    return true;
+    return false;
   }
 
   if (!signatureHeader) {
