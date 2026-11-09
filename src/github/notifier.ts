@@ -2,7 +2,7 @@ import { bot } from '../bot/instance.js';
 import { store } from '../storage/store.js';
 import { DispatchedEvent } from './dispatcher.js';
 
-export async function broadcastGitHubEvent(event: DispatchedEvent): Promise<number> {
+export async function broadcastGitHubEvent(event: DispatchedEvent, deliveryId?: string): Promise<number> {
   const targetChats = store.getChatsForRepo(event.repoFullName);
   if (targetChats.length === 0) {
     console.log(`ℹ️ No chats subscribed to repository "${event.repoFullName}" (total known chats: ${store.getAllChats().length})`);
@@ -12,6 +12,7 @@ export async function broadcastGitHubEvent(event: DispatchedEvent): Promise<numb
   let deliveredCount = 0;
 
   for (const chat of targetChats) {
+    if (deliveryId && store.wasDelivered(deliveryId, chat.chatId)) continue;
     // 1. Check if event is enabled for this chat
     if (event.eventType !== 'all') {
       const isEnabled = chat.eventsEnabled[event.eventType];
@@ -60,6 +61,7 @@ export async function broadcastGitHubEvent(event: DispatchedEvent): Promise<numb
         },
       });
       deliveredCount++;
+      if (deliveryId) store.recordDelivery(deliveryId, chat.chatId);
     } catch (err: any) {
       console.error(`Failed to send message to chat ${chat.chatId} (${chat.chatTitle}):`, err.message || err);
       // If thread not found (topic was closed or deleted), fallback to general topic if topicId was set
@@ -70,6 +72,7 @@ export async function broadcastGitHubEvent(event: DispatchedEvent): Promise<numb
             disable_notification: chat.silent,
           });
           deliveredCount++;
+          if (deliveryId) store.recordDelivery(deliveryId, chat.chatId);
         } catch (fallbackErr) {
           console.error(`Fallback send also failed for chat ${chat.chatId}:`, fallbackErr);
         }
