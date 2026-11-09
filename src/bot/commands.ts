@@ -208,7 +208,7 @@ export function registerBotCommands(bot: Bot): void {
     }
 
     if (!store.isRepoAllowed(ctx.chat.id, repoArg)) {
-      await ctx.reply('This repository is not approved for this chat. Ask the bot operator to add it to CHAT_REPO_ALLOWLIST.');
+      await ctx.reply('This repository is not approved for this chat. Ask the bot operator to allow it.');
       return;
     }
     const added = store.subscribeRepo(ctx.chat.id, repoArg);
