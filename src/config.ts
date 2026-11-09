@@ -23,9 +23,9 @@ export const config: BotConfig = {
 
 export function validateConfig(): void {
   if (!config.telegramToken) {
-    console.warn('⚠️ WARNING: TELEGRAM_BOT_TOKEN is not set in environment or .env file!');
+    throw new Error('TELEGRAM_BOT_TOKEN is required');
   }
-  if (!config.webhookSecret) {
-    console.warn('ℹ️ Notice: WEBHOOK_SECRET is not set. GitHub webhook signature verification is disabled (not recommended for production).');
+  if (!config.webhookSecret || config.webhookSecret === 'your_github_webhook_secret_here') {
+    throw new Error('WEBHOOK_SECRET is required');
   }
 }
