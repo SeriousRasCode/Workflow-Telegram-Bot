@@ -47,6 +47,7 @@ describe('HTTP Webhook Server', () => {
       headers: {
         'Content-Type': 'application/json',
         'X-GitHub-Event': 'ping',
+        'X-GitHub-Delivery': '12345678-1234-1234-1234-123456789abc',
         'X-Hub-Signature-256': `sha256=${hmac}`,
       },
       body: payload,
@@ -66,6 +67,7 @@ describe('HTTP Webhook Server', () => {
       headers: {
         'Content-Type': 'application/json',
         'X-GitHub-Event': 'push',
+        'X-GitHub-Delivery': '12345678-1234-1234-1234-123456789abd',
         'X-Hub-Signature-256': 'sha256=invalidhash12345678901234567890123456789012345678901234567890123456',
       },
       body: payload,
