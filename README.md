@@ -183,6 +183,8 @@ The Cloudflare version uses Telegram webhooks and a D1 database. Its settings ar
 
 The Cloudflare bot also supports `/disconnect <organization|owner/repo>`, `/toggle_event <event>`, `/verbosity <compact|detailed>`, and `/silent <on|off>`. In a private chat, prefix setting commands with the target chat ID. A repository administrator can configure a repository webhook, including for a personal repository. An organization owner can configure an organization webhook covering multiple repositories.
 
+Send `/menu` or `/settings` in a group or channel to open the inline management menu. Administrators can remove subscriptions, toggle events, change verbosity and silent mode, and review connections. In a forum group, open `/menu` inside a topic to assign that topic to an event. From a private chat, use `/menu <chat-id>` to manage a group or channel. Adding a repository still uses `/subscribe owner/repo` because its name must be entered as text.
+
 Each chat has its own organization connection and webhook secret. The Cloudflare version queues notifications in D1 and sends them in batches; its free-tier limits and Telegram rate limits still apply.
 
 ### Docker deployment

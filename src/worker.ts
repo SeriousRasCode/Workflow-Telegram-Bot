@@ -1,6 +1,7 @@
 import { parseAndDispatchGitHubEvent } from './github/dispatcher.js';
 import type { ChatSettings, EventType } from './types/store.js';
 import type { D1Database, ExecutionContext, ScheduledEvent } from '@cloudflare/workers-types';
+import { buildMenu, repoKey, type MenuView, type ConnectionSummary } from './worker/menu.js';
 
 interface Env {
   DB: D1Database;
@@ -57,6 +58,96 @@ async function saveSettings(env: Env, settings: ChatSettings): Promise<void> {
     .bind(String(settings.chatId), JSON.stringify(settings), Date.now()).run();
 }
 
+async function menuFor(env: Env, chat: TgChat, view: MenuView, threadId?: number) {
+  const settings = await getSettings(env, chat);
+  const rows = await env.DB.prepare('SELECT owner,verified FROM connections WHERE chat_id=? ORDER BY owner').bind(String(chat.id)).all<ConnectionSummary>();
+  return buildMenu(view, settings, rows.results, threadId);
+}
+
+async function handleMenuCallback(env: Env, update: TgUpdate): Promise<Response> {
+  const query = update.callback_query!;
+  const message = query.message;
+  const answer = (text?: string, showAlert = false) => telegram(env, 'answerCallbackQuery', {
+    callback_query_id: query.id, ...(text ? { text, show_alert: showAlert } : {}),
+  });
+  if (!message || !query.data?.startsWith('m:')) { await answer(); return reply('ok'); }
+  const parts = query.data.split(':');
+  const targetId = Number(parts[1]);
+  if (!Number.isSafeInteger(targetId) || (message.chat.type !== 'private' && targetId !== message.chat.id)) {
+    await answer('This menu belongs to another chat.', true); return reply('ok');
+  }
+  const target: TgChat = targetId === message.chat.id ? message.chat : { id: targetId, type: 'supergroup' };
+  if (!(await admin(env, target, query.from.id))) { await answer('Only chat administrators can manage this bot.', true); return reply('ok'); }
+  const settings = await getSettings(env, target);
+  let view: MenuView = 'home';
+  let threadId = message.message_thread_id;
+  const action = parts[2];
+  if (['home', 'repos', 'events', 'topics', 'prefs', 'connections'].includes(action)) {
+    view = action as MenuView;
+    if (action === 'topics' && parts[3]) threadId = Number(parts[3]);
+  } else if (action === 'event') {
+    const event = parts[3] as keyof ChatSettings['eventsEnabled'];
+    if (!event || !(event in settings.eventsEnabled)) { await answer('Unknown event.', true); return reply('ok'); }
+    settings.eventsEnabled[event] = !settings.eventsEnabled[event];
+    await saveSettings(env, settings);
+    view = 'events';
+  } else if (action === 'verbosity') {
+    settings.verbosity = settings.verbosity === 'compact' ? 'detailed' : 'compact';
+    await saveSettings(env, settings);
+    view = 'prefs';
+  } else if (action === 'silent') {
+    settings.silent = !settings.silent;
+    await saveSettings(env, settings);
+    view = 'prefs';
+  } else if (action === 'unsub') {
+    const index = Number(parts[3]);
+    const repo = settings.subscribedRepos[index];
+    if (!Number.isSafeInteger(index) || !repo || repoKey(repo) !== parts[4]) { await answer('Menu changed. Open /menu again.', true); return reply('ok'); }
+    await env.DB.prepare('DELETE FROM subscriptions WHERE chat_id=? AND repo=?').bind(String(targetId), repo.toLowerCase()).run();
+    settings.subscribedRepos.splice(index, 1);
+    await saveSettings(env, settings);
+    view = 'repos';
+  } else if (action === 'sub') {
+    const index = Number(parts[3]);
+    const rows = await env.DB.prepare('SELECT owner,verified FROM connections WHERE chat_id=? ORDER BY owner').bind(String(targetId)).all<ConnectionSummary>();
+    const connection = rows.results[index];
+    if (!Number.isSafeInteger(index) || !connection?.owner.includes('/') || repoKey(connection.owner) !== parts[4]) {
+      await answer('Menu changed. Open /menu again.', true); return reply('ok');
+    }
+    const repo = connection.owner.toLowerCase();
+    await env.DB.prepare('INSERT OR IGNORE INTO subscriptions(chat_id,repo) VALUES(?,?)').bind(String(targetId), repo).run();
+    if (!settings.subscribedRepos.includes(repo)) settings.subscribedRepos.push(repo);
+    await saveSettings(env, settings);
+    view = 'repos';
+  } else if (action === 'topic') {
+    const selectedThread = Number(parts[3]);
+    const event = parts[4] as EventType;
+    if (!Number.isSafeInteger(selectedThread) || selectedThread <= 0 || !events.includes(event) ||
+        message.chat.id !== targetId || message.message_thread_id !== selectedThread) {
+      await answer('Open this menu inside a forum topic.', true); return reply('ok');
+    }
+    settings.topics[event] = selectedThread;
+    await saveSettings(env, settings);
+    view = 'topics';
+    threadId = selectedThread;
+  } else if (action === 'untopic') {
+    const event = parts[3] as EventType;
+    if (!events.includes(event) || !(event in settings.topics)) { await answer('This route is already clear.', true); return reply('ok'); }
+    delete settings.topics[event];
+    await saveSettings(env, settings);
+    view = 'topics';
+  } else { await answer('Unknown menu action.', true); return reply('ok'); }
+  await answer();
+  const menu = await menuFor(env, target, view, threadId);
+  try {
+    await telegram(env, 'editMessageText', { chat_id: message.chat.id, message_id: message.message_id,
+      text: menu.text, parse_mode: 'HTML', reply_markup: menu.reply_markup, link_preview_options: { is_disabled: true } });
+  } catch (err) {
+    if (!String(err).includes('message is not modified')) throw err;
+  }
+  return reply('ok');
+}
+
 function escape(text: string): string { return text.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;'); }
 
 export function connectionMatches(scope: string, payload: { organization?: { login?: string }; repository?: { full_name?: string } }): boolean {
@@ -74,8 +165,7 @@ async function handleTelegram(request: Request, env: Env): Promise<Response> {
   const update = await request.json() as TgUpdate;
   const msg = update.message || update.channel_post;
   if (update.callback_query) {
-    await telegram(env, 'answerCallbackQuery', { callback_query_id: update.callback_query.id });
-    return reply('ok');
+    return handleMenuCallback(env, update);
   }
   if (!msg?.text) return reply('ok');
   const parts = msg.text.trim().split(/\s+/);
@@ -89,16 +179,27 @@ async function handleTelegram(request: Request, env: Env): Promise<Response> {
   const target: TgChat = targetId === chat.id ? chat : { id: targetId, type: 'supergroup' };
   const respond = (text: string, html = false) => send(env, chat.id, text, thread, html);
 
+  if (command === '/menu' || command === '/settings') {
+    const channelCommand = isChannelPost(update);
+    if (!userId && !channelCommand) return reply('ok');
+    if (isPrivate && targetId === chat.id) { await respond('Send <code>/menu CHAT_ID</code> to manage a group or channel. Get its ID with <code>/status</code> there.', true); return reply('ok'); }
+    if (!channelCommand && !(await admin(env, target, userId!))) { await respond('Only chat administrators can open this menu.'); return reply('ok'); }
+    const menu = await menuFor(env, target, 'home', thread);
+    await telegram(env, 'sendMessage', { chat_id: chat.id, text: menu.text, parse_mode: 'HTML', reply_markup: menu.reply_markup,
+      ...(thread ? { message_thread_id: thread } : {}), link_preview_options: { is_disabled: true } });
+    return reply('ok');
+  }
+
   if (command === '/start' && isPrivate && /^connect_-?\d+$/.test(parts[0] || '')) {
     const linkedChatId = parts[0].slice('connect_'.length);
     await respond(`<b>Connect chat ${escape(linkedChatId)}</b>\n\nChoose what to follow:\n• One repository: <code>/connect ${escape(linkedChatId)} owner/repo</code>\n• An organization: <code>/connect ${escape(linkedChatId)} organization</code>\n\nI’ll send the GitHub webhook URL and secret here, privately.`, true);
     return reply('ok');
   }
   if (command === '/start' || command === '/help') {
-    await respond('<b>GitHub notifications setup</b>\n\n1. Add me to your group or channel.\n2. Send <code>/status</code> there to get its chat ID.\n3. Message me privately: <code>/connect CHAT_ID owner/repo</code> for one repository, or <code>/connect CHAT_ID organization</code> for an entire organization.\n4. Add the GitHub webhook using the URL and secret I send you.\n5. Subscribe with <code>/subscribe owner/repo</code>.\n\nOther commands: <code>/settings</code>, <code>/repos</code>, <code>/set_topic pushes</code>, <code>/filter_branches main</code>.', true);
+    await respond('<b>GitHub notifications setup</b>\n\n1. Add me to your group or channel.\n2. Send <code>/status</code> there to get its chat ID.\n3. Message me privately: <code>/connect CHAT_ID owner/repo</code> for one repository, or <code>/connect CHAT_ID organization</code> for an entire organization.\n4. Add the GitHub webhook using the URL and secret I send you.\n5. Subscribe with <code>/subscribe owner/repo</code>.\n\nSend <code>/menu</code> to manage notifications with buttons.', true);
     return reply('ok');
   }
-  if (command === '/status' || command === '/settings') {
+  if (command === '/status') {
     const settings = await getSettings(env, chat);
     const owners = await env.DB.prepare('SELECT owner,verified FROM connections WHERE chat_id=?').bind(String(chat.id)).all<{ owner: string; verified: number }>();
     const connections = owners.results.map((x: { owner: string; verified: number }) => `• ${escape(x.owner)} ${x.verified ? '✅ webhook confirmed' : '⏳ webhook not confirmed'}`).join('\n') || 'None yet';
