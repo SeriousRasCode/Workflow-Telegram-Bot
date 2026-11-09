@@ -118,8 +118,17 @@ export class SettingsStore {
     const lowerRepo = repoFullName.toLowerCase();
     return this.getAllChats().filter((chat) => {
       return (
+        this.isRepoAllowed(chat.chatId, repoFullName) &&
         chat.subscribedRepos.some((r) => r.toLowerCase() === lowerRepo)
       );
+    });
+  }
+
+  public isRepoAllowed(chatId: number, repoFullName: string): boolean {
+    const repo = repoFullName.toLowerCase();
+    return (config.chatRepoAllowlist[String(chatId)] || []).some((allowed) => {
+      const rule = allowed.toLowerCase();
+      return rule === repo || (rule.endsWith('/*') && repo.startsWith(rule.slice(0, -1)));
     });
   }
 
@@ -172,6 +181,9 @@ export class SettingsStore {
     const cleaned = repoFullName.trim();
     if (!/^[A-Za-z0-9][A-Za-z0-9-]*\/[A-Za-z0-9._-]+$/.test(cleaned) || cleaned.includes('..')) {
       throw new Error('Repository must be in owner/repo format');
+    }
+    if (!this.isRepoAllowed(chatId, cleaned)) {
+      throw new Error('This repository is not approved for this chat');
     }
     if (!chat.subscribedRepos.some((r) => r.toLowerCase() === cleaned.toLowerCase())) {
       chat.subscribedRepos.push(cleaned);

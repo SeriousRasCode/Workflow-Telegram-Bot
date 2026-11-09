@@ -11,6 +11,7 @@ import { formatReleaseEvent } from '../src/github/formatters/release.js';
 import { formatWorkflowEvent } from '../src/github/formatters/workflow.js';
 import fs from 'node:fs';
 import path from 'node:path';
+import { config } from '../src/config.js';
 
 describe('GitHub Signature Verification', () => {
   const secret = 'my_super_secret_webhook_key_123';
@@ -46,6 +47,7 @@ describe('Store and Topic Routing', () => {
   let store: SettingsStore;
 
   test.beforeEach(() => {
+    config.chatRepoAllowlist = { '-100123456789': ['facebook/react', 'my-org/*'] };
     if (fs.existsSync(testDir)) {
       fs.rmSync(testDir, { recursive: true, force: true });
     }
@@ -102,6 +104,8 @@ describe('Store and Topic Routing', () => {
     assert.equal(chats.length, 1);
     assert.equal(chats[0].chatId, -100123456789);
     assert.equal(store.getChatsForRepo('other/private').length, 0);
+    assert.throws(() => store.subscribeRepo(-100123456789, 'other/private'), /not approved/);
+    assert.equal(store.subscribeRepo(-100123456789, 'my-org/api'), true);
 
     // Unsubscribe
     const removed = store.unsubscribeRepo(-100123456789, 'facebook/react');
