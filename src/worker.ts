@@ -101,9 +101,9 @@ async function handleTelegram(request: Request, env: Env): Promise<Response> {
   if (command === '/status' || command === '/settings') {
     const settings = await getSettings(env, chat);
     const owners = await env.DB.prepare('SELECT owner,verified FROM connections WHERE chat_id=?').bind(String(chat.id)).all<{ owner: string; verified: number }>();
-    const connections = owners.results.map((x: { owner: string; verified: number }) => `• ${escape(x.owner)} ${x.verified ? '✅' : '⏳ waiting for GitHub'}`).join('\n') || 'None yet';
+    const connections = owners.results.map((x: { owner: string; verified: number }) => `• ${escape(x.owner)} ${x.verified ? '✅ webhook confirmed' : '⏳ webhook not confirmed'}`).join('\n') || 'None yet';
     const repos = settings.subscribedRepos.map(x => `• ${escape(x)}`).join('\n') || 'None yet';
-    await respond(`<b>${command === '/status' ? 'Connection status' : 'Settings'}</b>\n\n<b>Chat ID:</b> <code>${chat.id}</code>\n\n<b>Connections</b>\n${connections}\n\n<b>Subscribed repositories</b>\n${repos}\n\n<b>Next step:</b> ${owners.results.length ? 'Use <code>/subscribe owner/repo</code> after the connection shows ✅.' : `Message me privately: <code>/connect ${chat.id} owner/repo</code> (one repo) or <code>/connect ${chat.id} organization</code> (all repos in an organization).`}`, true);
+    await respond(`<b>${command === '/status' ? 'Connection status' : 'Settings'}</b>\n\n<b>Chat ID:</b> <code>${chat.id}</code>\n\n<b>Connections</b>\n${connections}\n\n<b>Subscribed repositories</b>\n${repos}\n\n<b>Next step:</b> ${owners.results.length ? 'Use <code>/subscribe owner/repo</code> to follow a repository. If the webhook is unconfirmed, check GitHub’s Recent Deliveries.' : `Message me privately: <code>/connect ${chat.id} owner/repo</code> (one repo) or <code>/connect ${chat.id} organization</code> (all repos in an organization).`}`, true);
     return reply('ok');
   }
   const channelCommand = isChannelPost(update);
@@ -136,18 +136,15 @@ async function handleTelegram(request: Request, env: Env): Promise<Response> {
     const repo = (parts[0] || '').toLowerCase();
     if (!repoPattern.test(repo) || repo.includes('..')) { await respond('Usage: /subscribe <owner/repo>'); return reply('ok'); }
     const owner = repo.split('/')[0];
-    const conn = await env.DB.prepare('SELECT verified FROM connections WHERE chat_id=? AND owner IN (?,?) AND verified=1 LIMIT 1').bind(String(targetId), owner, repo).first<{ verified: number }>();
-    if (!conn?.verified) {
-      const pending = await env.DB.prepare('SELECT owner FROM connections WHERE chat_id=? AND owner IN (?,?) LIMIT 1').bind(String(targetId), owner, repo).first();
-      await respond(pending
-        ? `<b>Webhook waiting for GitHub</b>\n\nThe connection for <code>${escape(repo)}</code> is saved, but GitHub has not verified it yet. Add the webhook URL and secret I sent in our private chat to the repository’s <b>Settings → Webhooks</b>. GitHub will send a ping. Then try <code>/subscribe ${escape(repo)}</code> again.`
-        : `<b>Connect this repository first</b>\n\nMessage me privately: <code>/connect ${targetId} ${escape(repo)}</code>\n\nI’ll send its GitHub webhook URL and secret.`, true);
+    const conn = await env.DB.prepare('SELECT verified FROM connections WHERE chat_id=? AND owner IN (?,?) ORDER BY verified DESC LIMIT 1').bind(String(targetId), owner, repo).first<{ verified: number }>();
+    if (!conn) {
+      await respond(`<b>Connect this repository first</b>\n\nMessage me privately: <code>/connect ${targetId} ${escape(repo)}</code>\n\nI’ll send its GitHub webhook URL and secret.`, true);
       return reply('ok');
     }
     await env.DB.prepare('INSERT OR IGNORE INTO subscriptions(chat_id,repo) VALUES(?,?)').bind(String(targetId), repo).run();
     if (!settings.subscribedRepos.includes(repo)) settings.subscribedRepos.push(repo);
     await saveSettings(env, settings);
-    await respond(`✅ <b>Notifications enabled</b>\n\nThis chat now follows <code>${escape(repo)}</code>. Send <code>/settings</code> to review it.`, true); return reply('ok');
+    await respond(`✅ <b>Subscription saved</b>\n\nThis chat now follows <code>${escape(repo)}</code>.${conn.verified ? '' : '\n\nThe GitHub webhook has not been confirmed yet. Notifications will start when a signed delivery reaches the bot. You can check the webhook’s Recent Deliveries in GitHub.'} Send <code>/settings</code> to review it.`, true); return reply('ok');
   }
   if (command === '/unsubscribe') {
     const repo = (parts[0] || '').toLowerCase();
@@ -220,8 +217,8 @@ async function handleGitHub(request: Request, env: Env, chatId: string, scope: s
   const repo = String(payload.repository?.full_name || '').toLowerCase();
   if (!connectionMatches(scope, payload)) return reply('Webhook scope mismatch', 403);
   const eventName = request.headers.get('X-GitHub-Event') || '';
+  await env.DB.prepare('UPDATE connections SET verified=1 WHERE chat_id=? AND owner=?').bind(chatId, scope).run();
   if (eventName === 'ping') {
-    await env.DB.prepare('UPDATE connections SET verified=1 WHERE chat_id=? AND owner=?').bind(chatId, scope).run();
     return reply('connected');
   }
   const deliveryId = request.headers.get('X-GitHub-Delivery') || '';
