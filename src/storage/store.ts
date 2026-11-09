@@ -126,7 +126,7 @@ export class SettingsStore {
 
   public isRepoAllowed(chatId: number, repoFullName: string): boolean {
     const repo = repoFullName.toLowerCase();
-    return (config.chatRepoAllowlist[String(chatId)] || []).some((allowed) => {
+    return [...config.publicRepoAllowlist, ...(config.chatRepoAllowlist[String(chatId)] || [])].some((allowed) => {
       const rule = allowed.toLowerCase();
       return rule === repo || (rule.endsWith('/*') && repo.startsWith(rule.slice(0, -1)));
     });
