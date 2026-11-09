@@ -36,8 +36,8 @@ describe('GitHub Signature Verification', () => {
     assert.equal(verifyGitHubSignature('invalid_format', payload, secret), false);
   });
 
-  it('should allow all requests if secret is blank', () => {
-    assert.equal(verifyGitHubSignature(undefined, payload, ''), true);
+  it('should reject requests if secret is blank', () => {
+    assert.equal(verifyGitHubSignature(undefined, payload, ''), false);
   });
 });
 
@@ -68,6 +68,7 @@ describe('Store and Topic Routing', () => {
     assert.equal(chat.eventsEnabled.issues, true);
     assert.equal(chat.eventsEnabled.comments, false);
     assert.equal(chat.verbosity, 'detailed');
+    assert.deepEqual(chat.subscribedRepos, []);
   });
 
   it('should assign and update topic routing for forum topics', () => {
@@ -100,12 +101,28 @@ describe('Store and Topic Routing', () => {
     const chats = store.getChatsForRepo('facebook/react');
     assert.equal(chats.length, 1);
     assert.equal(chats[0].chatId, -100123456789);
+    assert.equal(store.getChatsForRepo('other/private').length, 0);
 
     // Unsubscribe
     const removed = store.unsubscribeRepo(-100123456789, 'facebook/react');
     assert.equal(removed, true);
     const chatsAfter = store.getChatsForRepo('facebook/react');
     assert.equal(chatsAfter.length, 0);
+  });
+
+  it('persists delivery records across restarts', () => {
+    store.recordDelivery('12345678-1234-1234-1234-123456789abc', -100123456789);
+    const reloaded = new SettingsStore(testDir);
+    assert.equal(reloaded.wasDelivered('12345678-1234-1234-1234-123456789abc', -100123456789), true);
+    assert.equal(reloaded.wasDelivered('12345678-1234-1234-1234-123456789abc', -100999999999), false);
+  });
+
+  it('removes legacy wildcard subscriptions on load', () => {
+    store.getOrCreateChat(-100123456789);
+    store.updateChat(-100123456789, { subscribedRepos: ['*', 'my-org/api'] });
+    const reloaded = new SettingsStore(testDir);
+    assert.deepEqual(reloaded.getChat(-100123456789)?.subscribedRepos, ['my-org/api']);
+    assert.equal(reloaded.getChatsForRepo('other/private').length, 0);
   });
 
   it('should toggle event notifications and verbosity', () => {
