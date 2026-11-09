@@ -59,6 +59,12 @@ async function saveSettings(env: Env, settings: ChatSettings): Promise<void> {
 
 function escape(text: string): string { return text.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;'); }
 
+export function connectionMatches(scope: string, payload: { organization?: { login?: string }; repository?: { full_name?: string } }): boolean {
+  const repo = String(payload.repository?.full_name || '').toLowerCase();
+  if (scope.includes('/')) return repo === scope;
+  return String(payload.organization?.login || repo.split('/')[0] || '').toLowerCase() === scope;
+}
+
 async function handleTelegram(request: Request, env: Env): Promise<Response> {
   if (request.headers.get('X-Telegram-Bot-Api-Secret-Token') !== env.TELEGRAM_WEBHOOK_SECRET) return reply('Unauthorized', 401);
   const update = await request.json() as TgUpdate;
@@ -79,61 +85,81 @@ async function handleTelegram(request: Request, env: Env): Promise<Response> {
   const target: TgChat = targetId === chat.id ? chat : { id: targetId, type: 'supergroup' };
   const respond = (text: string, html = false) => send(env, chat.id, text, thread, html);
 
+  if (command === '/start' && isPrivate && /^connect_-?\d+$/.test(parts[0] || '')) {
+    const linkedChatId = parts[0].slice('connect_'.length);
+    await respond(`<b>Connect chat ${escape(linkedChatId)}</b>\n\nChoose what to follow:\n• One repository: <code>/connect ${escape(linkedChatId)} owner/repo</code>\n• An organization: <code>/connect ${escape(linkedChatId)} organization</code>\n\nI’ll send the GitHub webhook URL and secret here, privately.`, true);
+    return reply('ok');
+  }
   if (command === '/start' || command === '/help') {
-    await respond('Use /status in a group to get its chat ID. In a private chat, send /connect <chat-id> <organization> to receive a GitHub webhook URL and secret. Add the webhook in GitHub, then use /subscribe <owner/repo> in the group. Other commands: /repos, /unsubscribe <owner/repo>, /disconnect <owner>, /set_topic <event>, /unset_topic <event>, /filter_branches <branches|all>, /toggle_event <event>, /verbosity <compact|detailed>, /silent <on|off>, /settings.');
+    await respond('<b>GitHub notifications setup</b>\n\n1. Add me to your group or channel.\n2. Send <code>/status</code> there to get its chat ID.\n3. Message me privately: <code>/connect CHAT_ID owner/repo</code> for one repository, or <code>/connect CHAT_ID organization</code> for an entire organization.\n4. Add the GitHub webhook using the URL and secret I send you.\n5. Subscribe with <code>/subscribe owner/repo</code>.\n\nOther commands: <code>/settings</code>, <code>/repos</code>, <code>/set_topic pushes</code>, <code>/filter_branches main</code>.', true);
     return reply('ok');
   }
   if (command === '/status' || command === '/settings') {
     const settings = await getSettings(env, chat);
     const owners = await env.DB.prepare('SELECT owner,verified FROM connections WHERE chat_id=?').bind(String(chat.id)).all<{ owner: string; verified: number }>();
-    await respond(`Chat ID: ${chat.id}\nConnected organizations: ${owners.results.map((x: { owner: string; verified: number }) => `${x.owner}${x.verified ? ' ✓' : ' (pending)'}`).join(', ') || 'none'}\nRepositories: ${settings.subscribedRepos.join(', ') || 'none'}\nTopics: ${JSON.stringify(settings.topics)}\nBranches: ${settings.branchFilter.join(', ') || 'all'}`);
+    const connections = owners.results.map((x: { owner: string; verified: number }) => `• ${escape(x.owner)} ${x.verified ? '✅' : '⏳ waiting for GitHub'}`).join('\n') || 'None yet';
+    const repos = settings.subscribedRepos.map(x => `• ${escape(x)}`).join('\n') || 'None yet';
+    await respond(`<b>${command === '/status' ? 'Connection status' : 'Settings'}</b>\n\n<b>Chat ID:</b> <code>${chat.id}</code>\n\n<b>Connections</b>\n${connections}\n\n<b>Subscribed repositories</b>\n${repos}\n\n<b>Next step:</b> ${owners.results.length ? 'Use <code>/subscribe owner/repo</code> after the connection shows ✅.' : `Message me privately: <code>/connect ${chat.id} owner/repo</code> (one repo) or <code>/connect ${chat.id} organization</code> (all repos in an organization).`}`, true);
     return reply('ok');
   }
   if (!userId) return reply('ok');
-  if (isPrivate && targetId === chat.id) { await respond('For this command, include the group or channel chat ID first. Get it using /status in that chat.'); return reply('ok'); }
+  if (isPrivate && targetId === chat.id) { await respond('Send <code>/status</code> in your group or channel to get its chat ID. Then try <code>/connect CHAT_ID owner/repo</code> here.', true); return reply('ok'); }
   if (!(await admin(env, target, userId))) { await respond('Only chat administrators can change these settings.'); return reply('ok'); }
   const settings = await getSettings(env, target);
 
   if (command === '/connect') {
-    if (!isPrivate) { await respond('Use this command in a private chat with the bot: /connect <chat-id> <organization>.'); return reply('ok'); }
-    const owner = (parts[0] || '').toLowerCase();
-    if (!ownerPattern.test(owner)) { await respond('Usage: /connect <chat-id> <organization>'); return reply('ok'); }
-    const secret = Array.from(crypto.getRandomValues(new Uint8Array(32)), b => b.toString(16).padStart(2, '0')).join('');
-    await env.DB.prepare('INSERT INTO connections(chat_id,owner,secret,verified) VALUES(?,?,?,0) ON CONFLICT(chat_id,owner) DO UPDATE SET secret=excluded.secret,verified=0')
-      .bind(String(targetId), owner, secret).run();
+    const scope = (parts[0] || '').toLowerCase();
+    if (!isPrivate) {
+      const self = await telegram(env, 'getMe', {});
+      const deepLink = `https://t.me/${self.username}?start=connect_${chat.id}`;
+      const suggested = ownerPattern.test(scope) || repoPattern.test(scope) ? `\n\nFor your choice, send <code>/connect ${chat.id} ${escape(scope)}</code> there.` : '';
+      await respond(`<b>Connect this chat</b>\n\n<a href="${escape(deepLink)}">Open private setup</a> to choose an organization or one repository. I’ll send the GitHub webhook URL and secret privately.${suggested}`, true);
+      return reply('ok');
+    }
+    if (!(ownerPattern.test(scope) || repoPattern.test(scope)) || scope.includes('..')) { await respond('Use <code>/connect CHAT_ID organization</code> or <code>/connect CHAT_ID owner/repo</code>.', true); return reply('ok'); }
+    const existing = await env.DB.prepare('SELECT secret,verified FROM connections WHERE chat_id=? AND owner=?').bind(String(targetId), scope).first<{ secret: string; verified: number }>();
+    const secret = existing?.secret || Array.from(crypto.getRandomValues(new Uint8Array(32)), b => b.toString(16).padStart(2, '0')).join('');
+    if (!existing) await env.DB.prepare('INSERT INTO connections(chat_id,owner,secret,verified) VALUES(?,?,?,0)')
+      .bind(String(targetId), scope, secret).run();
     await saveSettings(env, settings);
     const url = new URL(request.url);
-    await respond(`Add a GitHub organization webhook:\nURL: ${url.origin}/github/${targetId}/${owner}\nContent type: application/json\nSecret: ${secret}\nSelect the events you want. GitHub's ping event will verify the connection. Keep this secret private.`);
+    const kind = scope.includes('/') ? 'repository' : 'organization';
+    await respond(`<b>${existing?.verified ? 'Connected' : `Connect ${kind}`}: ${escape(scope)}</b>\n\n1. Open this ${kind}’s GitHub <b>Settings → Webhooks → Add webhook</b>.\n2. Set <b>Payload URL</b> to:\n<code>${escape(`${url.origin}/github/${targetId}/${scope}`)}</code>\n3. Set <b>Content type</b> to <code>application/json</code>.\n4. Set <b>Secret</b> to:\n<code>${secret}</code>\n5. Select the events you want and save.\n\nGitHub sends a ping to verify it. Then use <code>/subscribe ${scope.includes('/') ? escape(scope) : `${escape(scope)}/repo-name`}</code> in the group. Keep this secret private.`, true);
     return reply('ok');
   }
   if (command === '/subscribe') {
     const repo = (parts[0] || '').toLowerCase();
     if (!repoPattern.test(repo) || repo.includes('..')) { await respond('Usage: /subscribe <owner/repo>'); return reply('ok'); }
     const owner = repo.split('/')[0];
-    const conn = await env.DB.prepare('SELECT verified FROM connections WHERE chat_id=? AND owner=?').bind(String(targetId), owner).first<{ verified: number }>();
-    if (!conn?.verified) { await respond(`Connect ${owner} first using /connect ${targetId} ${owner} in a private chat, then wait for GitHub's ping.`); return reply('ok'); }
+    const conn = await env.DB.prepare('SELECT verified FROM connections WHERE chat_id=? AND owner IN (?,?) AND verified=1 LIMIT 1').bind(String(targetId), owner, repo).first<{ verified: number }>();
+    if (!conn?.verified) { await respond(`<b>One step first</b>\n\nMessage me privately: <code>/connect ${targetId} ${escape(repo)}</code>\n\nI’ll give you the GitHub webhook URL and secret. After GitHub verifies it, send <code>/subscribe ${escape(repo)}</code> again.`, true); return reply('ok'); }
     await env.DB.prepare('INSERT OR IGNORE INTO subscriptions(chat_id,repo) VALUES(?,?)').bind(String(targetId), repo).run();
     if (!settings.subscribedRepos.includes(repo)) settings.subscribedRepos.push(repo);
     await saveSettings(env, settings);
-    await respond(`Subscribed to ${repo}.`); return reply('ok');
+    await respond(`✅ <b>Notifications enabled</b>\n\nThis chat now follows <code>${escape(repo)}</code>. Send <code>/settings</code> to review it.`, true); return reply('ok');
   }
   if (command === '/unsubscribe') {
     const repo = (parts[0] || '').toLowerCase();
     await env.DB.prepare('DELETE FROM subscriptions WHERE chat_id=? AND repo=?').bind(String(targetId), repo).run();
     settings.subscribedRepos = settings.subscribedRepos.filter(x => x.toLowerCase() !== repo);
     await saveSettings(env, settings);
-    await respond(`Unsubscribed from ${repo}.`); return reply('ok');
+    await respond(`Removed <code>${escape(repo)}</code> from this chat.`, true); return reply('ok');
   }
   if (command === '/disconnect') {
-    const owner = (parts[0] || '').toLowerCase();
-    if (!ownerPattern.test(owner)) { await respond('Usage: /disconnect <organization>'); return reply('ok'); }
-    await env.DB.prepare('DELETE FROM connections WHERE chat_id=? AND owner=?').bind(String(targetId), owner).run();
-    await env.DB.prepare('DELETE FROM subscriptions WHERE chat_id=? AND repo LIKE ?').bind(String(targetId), `${owner}/%`).run();
-    settings.subscribedRepos = settings.subscribedRepos.filter(x => !x.toLowerCase().startsWith(`${owner}/`));
+    const scope = (parts[0] || '').toLowerCase();
+    if (!(ownerPattern.test(scope) || repoPattern.test(scope))) { await respond('Usage: /disconnect <organization|owner/repo>'); return reply('ok'); }
+    await env.DB.prepare('DELETE FROM connections WHERE chat_id=? AND owner=?').bind(String(targetId), scope).run();
+    if (scope.includes('/')) {
+      await env.DB.prepare('DELETE FROM subscriptions WHERE chat_id=? AND repo=?').bind(String(targetId), scope).run();
+      settings.subscribedRepos = settings.subscribedRepos.filter(x => x.toLowerCase() !== scope);
+    } else {
+      await env.DB.prepare('DELETE FROM subscriptions WHERE chat_id=? AND repo LIKE ?').bind(String(targetId), `${scope}/%`).run();
+      settings.subscribedRepos = settings.subscribedRepos.filter(x => !x.toLowerCase().startsWith(`${scope}/`));
+    }
     await saveSettings(env, settings);
-    await respond(`Disconnected ${owner} and removed its repository subscriptions.`); return reply('ok');
+    await respond(`Disconnected ${scope} and removed its repository subscriptions.`); return reply('ok');
   }
-  if (command === '/repos') { await respond(settings.subscribedRepos.join('\n') || 'No repositories subscribed.'); return reply('ok'); }
+  if (command === '/repos') { await respond(`<b>Repositories followed by this chat</b>\n\n${settings.subscribedRepos.map(x => `• <code>${escape(x)}</code>`).join('\n') || 'None yet. Use <code>/subscribe owner/repo</code>.'}`, true); return reply('ok'); }
   if (command === '/set_topic' || command === '/unset_topic') {
     const event = parts[0] as EventType;
     if (!events.includes(event)) { await respond(`Usage: ${command} <${events.join('|')}>`); return reply('ok'); }
@@ -170,8 +196,8 @@ async function handleTelegram(request: Request, env: Env): Promise<Response> {
   return reply('ok');
 }
 
-async function handleGitHub(request: Request, env: Env, chatId: string, owner: string): Promise<Response> {
-  const conn = await env.DB.prepare('SELECT secret FROM connections WHERE chat_id=? AND owner=?').bind(chatId, owner).first<{ secret: string }>();
+async function handleGitHub(request: Request, env: Env, chatId: string, scope: string): Promise<Response> {
+  const conn = await env.DB.prepare('SELECT secret FROM connections WHERE chat_id=? AND owner=?').bind(chatId, scope).first<{ secret: string }>();
   if (!conn) return reply('Unknown connection', 404);
   const signature = request.headers.get('X-Hub-Signature-256') || '';
   if (!/^sha256=[0-9a-f]{64}$/i.test(signature)) return reply('Invalid signature', 401);
@@ -181,11 +207,10 @@ async function handleGitHub(request: Request, env: Env, chatId: string, owner: s
   if (!(await crypto.subtle.verify('HMAC', key, digest, bytes))) return reply('Invalid signature', 401);
   const payload: any = JSON.parse(new TextDecoder().decode(bytes));
   const repo = String(payload.repository?.full_name || '').toLowerCase();
-  const actualOwner = String(payload.organization?.login || repo.split('/')[0] || '').toLowerCase();
-  if (actualOwner !== owner) return reply('Organization mismatch', 403);
+  if (!connectionMatches(scope, payload)) return reply('Webhook scope mismatch', 403);
   const eventName = request.headers.get('X-GitHub-Event') || '';
   if (eventName === 'ping') {
-    await env.DB.prepare('UPDATE connections SET verified=1 WHERE chat_id=? AND owner=?').bind(chatId, owner).run();
+    await env.DB.prepare('UPDATE connections SET verified=1 WHERE chat_id=? AND owner=?').bind(chatId, scope).run();
     return reply('connected');
   }
   const deliveryId = request.headers.get('X-GitHub-Delivery') || '';
@@ -236,9 +261,10 @@ export default {
       if (url.pathname === '/health') return Response.json({ status: 'ok' });
       if (request.method !== 'POST') return reply('Not found', 404);
       if (url.pathname === '/telegram') return await handleTelegram(request, env);
-      const match = url.pathname.match(/^\/github\/(-?\d+)\/([a-z0-9][a-z0-9-]*)$/i);
+      const match = url.pathname.match(/^\/github\/(-?\d+)\/([a-z0-9][a-z0-9-]*)(?:\/([a-z0-9._-]+))?$/i);
       if (match) {
-        const res = await handleGitHub(request, env, match[1], match[2].toLowerCase());
+        const scope = `${match[2]}${match[3] ? `/${match[3]}` : ''}`.toLowerCase();
+        const res = await handleGitHub(request, env, match[1], scope);
         if (res.status === 202) ctx.waitUntil(drain(env));
         return res;
       }
