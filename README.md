@@ -1,6 +1,6 @@
 # 🤖 GitHub Workflow Telegram Bot
 
-A production-ready Telegram Bot written in TypeScript and Node.js that delivers real-time GitHub repository events (pushes, pull requests, issues, comments, releases, workflow runs, stars, forks) directly to Telegram groups, channels, or private chats with **Telegram Forum Topics** support.
+A Telegram bot written in TypeScript and Node.js that delivers GitHub repository events (pushes, pull requests, issues, comments, releases, workflow runs, stars, forks) to Telegram groups, channels, or private chats with **Telegram Forum Topics** support.
 
 ---
 
@@ -15,7 +15,7 @@ A production-ready Telegram Bot written in TypeScript and Node.js that delivers 
 - **🌿 Branch Filtering**: Restrict push and workflow notifications to specific branches (e.g., `/filter_branches main master release/*`).
 - **📝 Verbosity Modes**: Switch between `detailed` (lists individual commits with SHA, message, author) and `compact` (summary line + compare link).
 - **🔕 Silent Mode**: Deliver notifications silently without sound/vibration (`disable_notification`).
-- **💾 Zero-External-DB Persistence**: Lightweight, atomic JSON storage with automatic schema initialization.
+- **💾 Single-instance persistence**: JSON storage for chat settings and recent delivery IDs. Run one bot instance with a persistent volume.
 - **🐳 Docker Ready**: Multi-stage `Dockerfile` and `docker-compose.yml` included.
 
 ---
@@ -104,6 +104,7 @@ npm start
 2. Promote the bot to **Administrator** or grant it permissions to:
    - **Send Messages**
    - **Manage Topics** (if your group uses Forum Topics)
+3. In each chat, an administrator must run `/subscribe owner/repo` for every repository whose notifications it should receive. A new chat receives no repository events by default. For an organization repository, use its full name, such as `/subscribe my-org/api`.
 
 ### Step 3: Assign Topics (Inside Group Topics)
 
@@ -143,7 +144,9 @@ Or open the interactive UI:
      - [x] Stars
      - [x] Forks
 4. Click **Add webhook**.
-5. GitHub will send a test `ping` event. You will see a green checkmark in GitHub and the bot will post a connection confirmation message!
+5. GitHub will send a test `ping` event. A subscribed chat will receive a connection message.
+
+For multi-chat deployments, treat group administrators as trusted operators: an administrator can subscribe their chat to any repository whose webhook uses this bot's shared secret. Use separate bot deployments and webhook secrets when groups must be isolated from one another. This deployment uses one JSON file and one long-polling bot process; do not run multiple replicas against the same data directory or bot token.
 
 ---
 
