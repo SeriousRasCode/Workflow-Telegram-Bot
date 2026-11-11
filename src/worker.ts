@@ -61,6 +61,11 @@ async function saveSettings(env: Env, settings: ChatSettings): Promise<void> {
     .bind(String(settings.chatId), JSON.stringify(settings), Date.now()).run();
 }
 
+async function recordStatus(env: Env, chatId: string, deliveryId: string, repo: string, eventType: string, state: string, detail = ''): Promise<void> {
+  await env.DB.prepare('INSERT INTO delivery_status(chat_id,delivery_id,repo,event_type,state,detail,updated_at) VALUES(?,?,?,?,?,?,?) ON CONFLICT(chat_id,delivery_id) DO UPDATE SET state=excluded.state,detail=excluded.detail,updated_at=excluded.updated_at')
+    .bind(chatId, deliveryId, repo, eventType, state, detail, Date.now()).run();
+}
+
 async function menuFor(env: Env, chat: TgChat, view: MenuView, threadId?: number) {
   const settings = await getSettings(env, chat);
   const rows = await env.DB.prepare('SELECT owner,verified FROM connections WHERE chat_id=? ORDER BY owner').bind(String(chat.id)).all<ConnectionSummary>();
@@ -203,7 +208,7 @@ async function handleTelegram(request: Request, env: Env): Promise<Response> {
     return reply('ok');
   }
   if (command === '/start' || command === '/help') {
-    await respond('<b>GitHub notifications setup</b>\n\n1. Add me to your group or channel.\n2. Send <code>/status</code> there to get its chat ID.\n3. Message me privately: <code>/connect CHAT_ID owner/repo</code> for one repository, or <code>/connect CHAT_ID organization</code> for an entire organization.\n4. Add the GitHub webhook using the URL and secret I send you.\n5. Subscribe with <code>/subscribe owner/repo</code>.\n\nSend <code>/menu</code> to manage notifications with buttons.', true);
+    await respond('<b>GitHub notifications setup</b>\n\n1. Add me to your group or channel.\n2. Send <code>/status</code> there to get its chat ID.\n3. Message me privately: <code>/connect CHAT_ID owner/repo</code> for one repository, or <code>/connect CHAT_ID organization</code> for an entire organization.\n4. Add the GitHub webhook using the URL and secret I send you.\n5. Subscribe with <code>/subscribe owner/repo</code>.\n\nUse <code>/test</code> to check Telegram delivery and <code>/delivery_status</code> for recent GitHub outcomes. Send <code>/menu</code> to manage notifications with buttons.', true);
     return reply('ok');
   }
   if (command === '/status') {
@@ -341,6 +346,23 @@ async function handleTelegram(request: Request, env: Env): Promise<Response> {
     await respond(settings.dailyDigest ? `Daily digest: ${settings.dailyDigest.time} (${settings.dailyDigest.timeZone}).` : 'Daily digest off. Pending items will send after quiet hours.');
     return reply('ok');
   }
+  if (command === '/test') {
+    const targetSettings = await getSettings(env, target);
+    const connections = await env.DB.prepare('SELECT COUNT(*) AS total,SUM(verified) AS verified FROM connections WHERE chat_id=?')
+      .bind(String(targetId)).first<{ total: number; verified: number | null }>();
+    try {
+      await send(env, targetId, `<b>✅ Test notification delivered</b>\n\nSubscriptions: <b>${targetSettings.subscribedRepos.length}</b>\nConfirmed webhooks: <b>${connections?.verified || 0}/${connections?.total || 0}</b>\n\nThis confirms Telegram delivery. A GitHub webhook is confirmed when its signed ping arrives.`, targetId === chat.id ? thread : undefined, true);
+      if (targetId !== chat.id) await respond(`Test notification sent to chat ${targetId}.`);
+    } catch (err) { console.error('Test delivery failed', err); await respond('Test delivery failed. Check the bot permissions and chat ID.'); }
+    return reply('ok');
+  }
+  if (command === '/delivery_status') {
+    const rows = await env.DB.prepare('SELECT repo,event_type,state,detail FROM delivery_status WHERE chat_id=? ORDER BY updated_at DESC LIMIT 5')
+      .bind(String(targetId)).all<{ repo: string; event_type: string; state: string; detail: string }>();
+    const details = rows.results.map(item => `• <code>${escape(item.repo)}</code> ${escape(item.event_type)}: <b>${escape(item.state)}</b>${item.detail ? ` (${escape(item.detail)})` : ''}`);
+    await respond(`<b>Recent GitHub deliveries</b>\n\n${details.join('\n') || 'No deliveries recorded yet.'}`, true);
+    return reply('ok');
+  }
   await respond('Unknown command. Use /help.');
   return reply('ok');
 }
@@ -367,14 +389,16 @@ async function handleGitHub(request: Request, env: Env, chatId: string, scope: s
   const alreadySent = await env.DB.prepare('SELECT 1 FROM deliveries WHERE delivery_id=? AND chat_id=?').bind(deliveryId, chatId).first();
   if (alreadySent) return reply('already delivered');
   const sub = await env.DB.prepare('SELECT 1 FROM subscriptions WHERE chat_id=? AND repo=?').bind(chatId, repo).first();
-  if (!sub) return reply('not subscribed');
+  if (!sub) { await recordStatus(env, chatId, deliveryId, repo, eventName, 'filtered', 'Not subscribed'); return reply('not subscribed'); }
   const event = parseAndDispatchGitHubEvent(eventName, payload);
-  if (!event) return reply('ignored');
+  if (!event) { await recordStatus(env, chatId, deliveryId, repo, eventName, 'filtered', 'Unsupported event'); return reply('ignored'); }
   const settings = await getSettings(env, { id: Number(chatId), type: 'supergroup' });
-  if (event.eventType !== 'all' && !settings.eventsEnabled[event.eventType]) return reply('disabled');
-  if (event.branchName && settings.branchFilter.length && !settings.branchFilter.some(x => x.endsWith('*') ? event.branchName!.startsWith(x.slice(0, -1)) : x === event.branchName)) return reply('filtered');
+  if (event.eventType !== 'all' && !settings.eventsEnabled[event.eventType]) { await recordStatus(env, chatId, deliveryId, repo, eventName, 'disabled'); return reply('disabled'); }
+  if (event.branchName && settings.branchFilter.length && !settings.branchFilter.some(x => x.endsWith('*') ? event.branchName!.startsWith(x.slice(0, -1)) : x === event.branchName)) {
+    await recordStatus(env, chatId, deliveryId, repo, eventName, 'filtered', 'Branch filter'); return reply('filtered');
+  }
   const alert = selectWorkflowAlert(event, settings);
-  if (!alert) return reply('ignored');
+  if (!alert) { await recordStatus(env, chatId, deliveryId, repo, eventName, 'filtered', 'Event action or alert mode'); return reply('ignored'); }
   if (shouldQueueDigest(settings, Boolean(alert.failureKey || alert.clearKey))) {
     await env.DB.batch([
       env.DB.prepare('INSERT OR IGNORE INTO digest_items(delivery_id,chat_id,message,created_at) VALUES(?,?,?,?)')
@@ -382,11 +406,13 @@ async function handleGitHub(request: Request, env: Env, chatId: string, scope: s
       env.DB.prepare('INSERT OR IGNORE INTO deliveries(delivery_id,chat_id,sent_at) VALUES(?,?,?)')
         .bind(deliveryId, chatId, Date.now()),
     ]);
+    await recordStatus(env, chatId, deliveryId, repo, eventName, 'digest', 'Waiting for digest');
     return reply('queued for digest', 202);
   }
   const thread = settings.topics[event.eventType] ?? settings.topics.all ?? null;
   await env.DB.prepare('INSERT OR IGNORE INTO jobs(delivery_id,chat_id,message,thread_id,silent,created_at) VALUES(?,?,?,?,?,?)')
     .bind(deliveryId, chatId, alert.message, thread, settings.silent ? 1 : 0, Date.now()).run();
+  await recordStatus(env, chatId, deliveryId, repo, eventName, 'queued');
   if (alert.failureKey || alert.clearKey) {
     recordWorkflowAlert(settings, alert);
     await saveSettings(env, settings);
@@ -409,6 +435,7 @@ async function queueDueDigests(env: Env): Promise<void> {
       await env.DB.batch([
         env.DB.prepare('INSERT OR IGNORE INTO jobs(delivery_id,chat_id,message,thread_id,silent,created_at) VALUES(?,?,?,?,?,?)')
           .bind(id, row.chat_id, chunk.text, settings.topics.all ?? null, settings.silent ? 1 : 0, Date.now()),
+        ...batch.map(item => env.DB.prepare('INSERT OR IGNORE INTO digest_job_items(job_id,chat_id,delivery_id) VALUES(?,?,?)').bind(id, row.chat_id, item.delivery_id)),
         ...batch.map(item => env.DB.prepare('DELETE FROM digest_items WHERE delivery_id=? AND chat_id=?').bind(item.delivery_id, row.chat_id)),
       ]);
       offset += chunk.count;
@@ -431,15 +458,21 @@ async function drain(env: Env): Promise<void> {
       await telegram(env, 'sendMessage', { chat_id: job.chat_id, text: job.message, parse_mode: 'HTML',
         ...(job.thread_id ? { message_thread_id: job.thread_id } : {}), disable_notification: Boolean(job.silent) });
       await env.DB.prepare('INSERT OR IGNORE INTO deliveries(delivery_id,chat_id,sent_at) VALUES(?,?,?)').bind(job.delivery_id, job.chat_id, Date.now()).run();
+      await env.DB.prepare("UPDATE delivery_status SET state='delivered',detail='',updated_at=? WHERE chat_id=? AND (delivery_id=? OR delivery_id IN (SELECT delivery_id FROM digest_job_items WHERE job_id=? AND chat_id=?))")
+        .bind(Date.now(), job.chat_id, job.delivery_id, job.delivery_id, job.chat_id).run();
+      await env.DB.prepare('DELETE FROM digest_job_items WHERE job_id=? AND chat_id=?').bind(job.delivery_id, job.chat_id).run();
       await env.DB.prepare('DELETE FROM jobs WHERE delivery_id=? AND chat_id=?').bind(job.delivery_id, job.chat_id).run();
     } catch (err) {
       console.error('Telegram delivery failed', job.chat_id, err);
+      await env.DB.prepare("UPDATE delivery_status SET state='failed',detail='Retry scheduled',updated_at=? WHERE chat_id=? AND (delivery_id=? OR delivery_id IN (SELECT delivery_id FROM digest_job_items WHERE job_id=? AND chat_id=?))")
+        .bind(Date.now(), job.chat_id, job.delivery_id, job.delivery_id, job.chat_id).run();
       const delay = Math.min(60 * 60_000, 2 ** Math.min(job.attempts, 10) * 60_000);
       await env.DB.prepare('UPDATE jobs SET attempts=attempts+1,next_attempt_at=? WHERE delivery_id=? AND chat_id=?')
         .bind(now + delay, job.delivery_id, job.chat_id).run();
     }
   }
   await env.DB.prepare('DELETE FROM deliveries WHERE sent_at<?').bind(now - 7 * 86400_000).run();
+  await env.DB.prepare('DELETE FROM delivery_status WHERE updated_at<?').bind(now - 7 * 86400_000).run();
 }
 
 export default {

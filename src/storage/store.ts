@@ -1,6 +1,6 @@
 import fs from 'fs';
 import path from 'path';
-import { ChatSettings, StoreData, EventType, ChatEventsEnabled } from '../types/store.js';
+import { ChatSettings, StoreData, EventType, ChatEventsEnabled, DeliveryStatus } from '../types/store.js';
 import { config } from '../config.js';
 
 const DEFAULT_EVENTS_ENABLED: ChatEventsEnabled = {
@@ -16,7 +16,7 @@ const DEFAULT_EVENTS_ENABLED: ChatEventsEnabled = {
 
 export class SettingsStore {
   private filePath: string;
-  private data: StoreData = { chats: {}, deliveries: {}, digestItems: {}, version: 3 };
+  private data: StoreData = { chats: {}, deliveries: {}, digestItems: {}, deliveryStatus: {}, version: 4 };
 
   constructor(dataDir: string = config.dataDir) {
     if (!fs.existsSync(dataDir)) {
@@ -36,6 +36,7 @@ export class SettingsStore {
         }
         this.data.deliveries ||= {};
         this.data.digestItems ||= {};
+        this.data.deliveryStatus ||= {};
         // Earlier versions subscribed every chat to every repository implicitly.
         for (const chat of Object.values(this.data.chats)) {
           chat.subscribedRepos = (chat.subscribedRepos || []).filter((repo) => repo !== '*');
@@ -117,6 +118,19 @@ export class SettingsStore {
   public removeDigestItems(chatId: number, count: number): void {
     this.data.digestItems?.[String(chatId)]?.splice(0, count);
     this.save();
+  }
+
+  public recordDeliveryStatus(chatId: number, status: Omit<DeliveryStatus, 'updatedAt'>): void {
+    const list = (this.data.deliveryStatus ||= {})[String(chatId)] ||= [];
+    const index = list.findIndex(item => item.deliveryId === status.deliveryId);
+    if (index >= 0) list.splice(index, 1);
+    list.unshift({ ...status, updatedAt: new Date().toISOString() });
+    list.splice(20);
+    this.save();
+  }
+
+  public getDeliveryStatus(chatId: number): DeliveryStatus[] {
+    return [...(this.data.deliveryStatus?.[String(chatId)] || [])];
   }
 
   public wasDelivered(deliveryId: string, chatId: number): boolean {

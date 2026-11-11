@@ -15,10 +15,15 @@ export async function broadcastGitHubEvent(event: DispatchedEvent, deliveryId?: 
 
   for (const chat of targetChats) {
     if (deliveryId && store.wasDelivered(deliveryId, chat.chatId)) continue;
+    const status = (state: 'delivered' | 'digest' | 'filtered' | 'disabled' | 'failed', detail?: string) => {
+      if (deliveryId) store.recordDeliveryStatus(chat.chatId, { deliveryId, repo: event.repoFullName,
+        eventType: event.eventType, state, detail });
+    };
     // 1. Check if event is enabled for this chat
     if (event.eventType !== 'all') {
       const isEnabled = chat.eventsEnabled[event.eventType];
       if (!isEnabled) {
+        status('disabled');
         continue;
       }
     }
@@ -34,6 +39,7 @@ export async function broadcastGitHubEvent(event: DispatchedEvent, deliveryId?: 
       });
 
       if (!matchesBranch) {
+        status('filtered', 'Branch filter');
         continue;
       }
     }
@@ -49,12 +55,14 @@ export async function broadcastGitHubEvent(event: DispatchedEvent, deliveryId?: 
     // 4. Format the message for this chat's verbosity
     const alert = selectWorkflowAlert(event, chat);
     if (!alert) {
+      status('filtered', 'Event action or alert mode');
       continue;
     }
     const messageHtml = alert.message;
     if (shouldQueueDigest(chat, Boolean(alert.failureKey || alert.clearKey))) {
       store.queueDigest(chat.chatId, digestItem(event.repoFullName, messageHtml));
       if (deliveryId) store.recordDelivery(deliveryId, chat.chatId);
+      status('digest');
       continue;
     }
 
@@ -70,11 +78,13 @@ export async function broadcastGitHubEvent(event: DispatchedEvent, deliveryId?: 
       });
       deliveredCount++;
       if (deliveryId) store.recordDelivery(deliveryId, chat.chatId);
+      status('delivered');
       if (alert.failureKey || alert.clearKey) {
         recordWorkflowAlert(chat, alert);
         store.updateChat(chat.chatId, { workflowFailures: chat.workflowFailures });
       }
     } catch (err: any) {
+      status('failed', 'Telegram send failed');
       console.error(`Failed to send message to chat ${chat.chatId} (${chat.chatTitle}):`, err.message || err);
       // If thread not found (topic was closed or deleted), fallback to general topic if topicId was set
       if (err.description && err.description.includes('message thread not found') && topicId) {
@@ -85,6 +95,7 @@ export async function broadcastGitHubEvent(event: DispatchedEvent, deliveryId?: 
           });
           deliveredCount++;
           if (deliveryId) store.recordDelivery(deliveryId, chat.chatId);
+          status('delivered', 'Sent to general chat after topic failure');
           if (alert.failureKey || alert.clearKey) {
             recordWorkflowAlert(chat, alert);
             store.updateChat(chat.chatId, { workflowFailures: chat.workflowFailures });
