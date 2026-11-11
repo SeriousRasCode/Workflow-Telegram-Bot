@@ -51,6 +51,8 @@ export function buildSettingsText(chat: ChatSettings): string {
   text += `🌿 <b>Branch Filter:</b> ${chat.branchFilter.length > 0 ? chat.branchFilter.map((b) => `<code>${escapeHtml(b)}</code>`).join(', ') : '<i>All branches</i>'}\n`;
   text += `📝 <b>Verbosity:</b> <code>${chat.verbosity}</code>\n`;
   text += `⚙️ <b>Workflow alerts:</b> <code>${chat.workflowAlerts === 'failures' ? 'failures and recovery' : 'all completions'}</code>\n`;
+  text += `🌙 <b>Quiet hours:</b> ${chat.quietHours ? `<code>${escapeHtml(chat.quietHours.start)}–${escapeHtml(chat.quietHours.end)} ${escapeHtml(chat.quietHours.timeZone)}</code>` : 'Off'}\n`;
+  text += `📬 <b>Daily digest:</b> ${chat.dailyDigest ? `<code>${escapeHtml(chat.dailyDigest.time)} ${escapeHtml(chat.dailyDigest.timeZone)}</code>` : 'Off'}\n`;
   text += `🔕 <b>Silent Notifications:</b> ${chat.silent ? '<b>Yes</b>' : '<b>No</b>'}\n`;
 
   return text;
