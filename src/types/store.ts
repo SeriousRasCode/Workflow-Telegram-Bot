@@ -37,6 +37,7 @@ export interface ChatSettings {
   chatTitle: string;
   isForum?: boolean;
   subscribedRepos: string[]; // Explicit owner/repo subscriptions
+  repositoryRules?: Record<string, RepositoryRule>;
   topics: ChatTopicSettings;
   topicNames: Record<string, string>; // threadId -> topic title
   eventsEnabled: ChatEventsEnabled;
@@ -50,6 +51,12 @@ export interface ChatSettings {
   silent: boolean;
   createdAt: string;
   updatedAt: string;
+}
+
+export interface RepositoryRule {
+  eventsEnabled?: Partial<ChatEventsEnabled>;
+  branchFilter?: string[];
+  topics?: ChatTopicSettings;
 }
 
 export interface StoreData {
