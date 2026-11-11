@@ -2,6 +2,7 @@ import { parseAndDispatchGitHubEvent } from './github/dispatcher.js';
 import type { ChatSettings, EventType } from './types/store.js';
 import type { D1Database, ExecutionContext, ScheduledEvent } from '@cloudflare/workers-types';
 import { buildMenu, repoKey, type MenuView, type ConnectionSummary } from './worker/menu.js';
+import { selectWorkflowAlert, recordWorkflowAlert } from './github/workflow_alerts.js';
 
 interface Env {
   DB: D1Database;
@@ -44,7 +45,7 @@ function defaultSettings(chat: TgChat): ChatSettings {
   const now = new Date().toISOString();
   return { chatId: chat.id, chatTitle: chat.title || 'Chat', isForum: Boolean(chat.is_forum), subscribedRepos: [], topics: {}, topicNames: {},
     eventsEnabled: { pushes: true, prs: true, issues: true, comments: false, releases: true, workflows: false, stars: true, forks: true },
-    branchFilter: [], verbosity: 'detailed', silent: false, createdAt: now, updatedAt: now };
+    branchFilter: [], verbosity: 'detailed', workflowAlerts: 'all', workflowFailures: {}, silent: false, createdAt: now, updatedAt: now };
 }
 
 async function getSettings(env: Env, chat: TgChat): Promise<ChatSettings> {
@@ -97,6 +98,10 @@ async function handleMenuCallback(env: Env, update: TgUpdate): Promise<Response>
     view = 'prefs';
   } else if (action === 'silent') {
     settings.silent = !settings.silent;
+    await saveSettings(env, settings);
+    view = 'prefs';
+  } else if (action === 'workflow') {
+    settings.workflowAlerts = settings.workflowAlerts === 'failures' ? 'all' : 'failures';
     await saveSettings(env, settings);
     view = 'prefs';
   } else if (action === 'unsub') {
@@ -301,6 +306,12 @@ async function handleTelegram(request: Request, env: Env): Promise<Response> {
     await saveSettings(env, settings);
     await respond(`Silent notifications: ${settings.silent ? 'on' : 'off'}`); return reply('ok');
   }
+  if (command === '/workflow_alerts') {
+    if (parts[0] !== 'all' && parts[0] !== 'failures') { await respond('Usage: /workflow_alerts <all|failures>'); return reply('ok'); }
+    settings.workflowAlerts = parts[0];
+    await saveSettings(env, settings);
+    await respond(`Workflow alerts: ${settings.workflowAlerts}. Enable workflow events in /menu to receive them.`); return reply('ok');
+  }
   await respond('Unknown command. Use /help.');
   return reply('ok');
 }
@@ -333,11 +344,15 @@ async function handleGitHub(request: Request, env: Env, chatId: string, scope: s
   const settings = await getSettings(env, { id: Number(chatId), type: 'supergroup' });
   if (event.eventType !== 'all' && !settings.eventsEnabled[event.eventType]) return reply('disabled');
   if (event.branchName && settings.branchFilter.length && !settings.branchFilter.some(x => x.endsWith('*') ? event.branchName!.startsWith(x.slice(0, -1)) : x === event.branchName)) return reply('filtered');
-  const message = event.format(settings.verbosity);
-  if (!message) return reply('ignored');
+  const alert = selectWorkflowAlert(event, settings);
+  if (!alert) return reply('ignored');
   const thread = settings.topics[event.eventType] ?? settings.topics.all ?? null;
   await env.DB.prepare('INSERT OR IGNORE INTO jobs(delivery_id,chat_id,message,thread_id,silent,created_at) VALUES(?,?,?,?,?,?)')
-    .bind(deliveryId, chatId, message, thread, settings.silent ? 1 : 0, Date.now()).run();
+    .bind(deliveryId, chatId, alert.message, thread, settings.silent ? 1 : 0, Date.now()).run();
+  if (alert.failureKey || alert.clearKey) {
+    recordWorkflowAlert(settings, alert);
+    await saveSettings(env, settings);
+  }
   return reply('queued', 202);
 }
 
