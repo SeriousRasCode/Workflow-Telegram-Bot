@@ -3,6 +3,7 @@ import { store } from '../storage/store.js';
 import { config } from '../config.js';
 import { EventType } from '../types/store.js';
 import { isChatAdmin, escapeHtml } from './utils.js';
+import { validTime, validTimeZone } from './digest.js';
 import {
   buildSettingsText,
   buildMainMenuKeyboard,
@@ -55,6 +56,8 @@ export function registerBotCommands(bot: Bot): void {
     help += `• <code>/filter_branches &lt;b1&gt; &lt;b2&gt;</code> &mdash; Only notify for specific branches\n`;
     help += `• <code>/filter_branches all</code> &mdash; Notify for all branches\n`;
     help += `• <code>/workflow_alerts &lt;all|failures&gt;</code> &mdash; Choose CI alerts\n`;
+    help += `• <code>/quiet_hours 22:00 08:00 Africa/Nairobi</code> &mdash; Pause routine alerts\n`;
+    help += `• <code>/digest daily 09:00 Africa/Nairobi</code> &mdash; Send routine activity daily\n`;
 
     await ctx.reply(help, { parse_mode: 'HTML' });
   });
@@ -340,6 +343,40 @@ export function registerBotCommands(bot: Bot): void {
     }
     store.updateChat(ctx.chat.id, { workflowAlerts: mode });
     await ctx.reply(`Workflow alerts: ${mode}. Enable workflow events in /settings to receive them.`);
+  });
+
+  bot.command('quiet_hours', async (ctx) => {
+    if (!(await isChatAdmin(ctx))) { await ctx.reply('Only chat administrators can change quiet hours.'); return; }
+    const parts = ctx.message?.text?.split(/\s+/).slice(1) || [];
+    if (parts[0] === 'off') {
+      store.updateChat(ctx.chat.id, { quietHours: null });
+      await ctx.reply('Quiet hours off.');
+      return;
+    }
+    const [start, end, timeZone] = parts;
+    if (!validTime(start || '') || !validTime(end || '') || start === end || !validTimeZone(timeZone || '')) {
+      await ctx.reply('Usage: /quiet_hours <HH:MM> <HH:MM> <IANA timezone> or /quiet_hours off. Example: /quiet_hours 22:00 08:00 Africa/Nairobi');
+      return;
+    }
+    store.updateChat(ctx.chat.id, { quietHours: { start, end, timeZone } });
+    await ctx.reply(`Quiet hours: ${start}–${end} (${timeZone}).`);
+  });
+
+  bot.command('digest', async (ctx) => {
+    if (!(await isChatAdmin(ctx))) { await ctx.reply('Only chat administrators can change the digest.'); return; }
+    const parts = ctx.message?.text?.split(/\s+/).slice(1) || [];
+    if (parts[0] === 'off') {
+      store.updateChat(ctx.chat.id, { dailyDigest: null });
+      await ctx.reply('Daily digest off. Pending items will send after quiet hours.');
+      return;
+    }
+    const [mode, time, timeZone] = parts;
+    if (mode !== 'daily' || !validTime(time || '') || !validTimeZone(timeZone || '')) {
+      await ctx.reply('Usage: /digest daily <HH:MM> <IANA timezone> or /digest off. Example: /digest daily 09:00 Africa/Nairobi');
+      return;
+    }
+    store.updateChat(ctx.chat.id, { dailyDigest: { time, timeZone }, lastDigestDate: undefined });
+    await ctx.reply(`Daily digest: ${time} (${timeZone}).`);
   });
 
   // Handle Inline Keyboard Callback Queries

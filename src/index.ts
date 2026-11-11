@@ -3,6 +3,7 @@ import { bot } from './bot/instance.js';
 import { registerBotCommands } from './bot/commands.js';
 import { createServer } from './server/app.js';
 import { store } from './storage/store.js';
+import { flushDigests } from './github/notifier.js';
 
 async function bootstrap() {
   console.log('🚀 Starting GitHub Webhook Telegram Bot...');
@@ -32,6 +33,8 @@ async function bootstrap() {
         { command: 'repos', description: 'List subscribed repositories' },
         { command: 'filter_branches', description: 'Set branch filter for push events' },
         { command: 'workflow_alerts', description: 'Choose all CI runs or failures and recovery' },
+        { command: 'quiet_hours', description: 'Pause routine alerts during set hours' },
+        { command: 'digest', description: 'Set a daily activity digest' },
         { command: 'help', description: 'Show bot usage instructions' },
       ]);
       console.log('✅ Telegram bot command menu registered.');
@@ -45,6 +48,8 @@ async function bootstrap() {
         console.log(`🤖 Telegram bot @${botInfo.username} is running and ready for messages!`);
       },
     });
+    const digestTimer = setInterval(() => { void flushDigests(); }, 60_000);
+    digestTimer.unref();
   } else {
     console.log('------------------------------------------------------------------------');
     console.log('ℹ️ Bot token not configured yet.');

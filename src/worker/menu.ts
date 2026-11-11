@@ -60,7 +60,9 @@ export function buildMenu(view: MenuView, chat: ChatSettings, connections: Conne
   } else if (view === 'prefs') {
     text = `<b>⚙️ Preferences</b>\n\nMessage style: <b>${chat.verbosity}</b>\nSilent notifications: <b>${chat.silent ? 'On' : 'Off'}</b>\nBranch filter: <b>${chat.branchFilter.length ? chat.branchFilter.map(esc).join(', ') : 'All branches'}</b>` +
       `\nWorkflow alerts: <b>${chat.workflowAlerts === 'failures' ? 'Failures and recovery' : 'All completions'}</b>` +
-      '\n\nTo change branches, send <code>/filter_branches main release/*</code> or <code>/filter_branches all</code>.';
+      `\nQuiet hours: <b>${chat.quietHours ? `${esc(chat.quietHours.start)}–${esc(chat.quietHours.end)} ${esc(chat.quietHours.timeZone)}` : 'Off'}</b>` +
+      `\nDaily digest: <b>${chat.dailyDigest ? `${esc(chat.dailyDigest.time)} ${esc(chat.dailyDigest.timeZone)}` : 'Off'}</b>` +
+      '\n\nSet with <code>/quiet_hours 22:00 08:00 Africa/Nairobi</code> and <code>/digest daily 09:00 Africa/Nairobi</code>. Send <code>/quiet_hours off</code> or <code>/digest off</code> to disable.';
     rows.push([button(id, `Style: ${chat.verbosity}`, 'verbosity'), button(id, `Silent: ${chat.silent ? 'On' : 'Off'}`, 'silent')]);
     rows.push([button(id, `CI: ${chat.workflowAlerts === 'failures' ? 'Failures' : 'All runs'}`, 'workflow')]);
     rows.push(back(id));

@@ -166,6 +166,8 @@ The allowlists control which repository events each chat may receive, including 
 | `/filter_branches <branches>` | Filter notifications to specific branches (e.g. `/filter_branches main develop`) | Admin |
 | `/filter_branches all` | Clears branch filter (notifies on all branches) | Admin |
 | `/workflow_alerts <all|failures>` | Choose all completed CI runs or failures with recovery alerts | Admin |
+| `/quiet_hours <start> <end> <timezone>` | Buffer routine notifications during local quiet hours; `/quiet_hours off` disables | Admin |
+| `/digest daily <time> <timezone>` | Send routine events in a daily digest; `/digest off` disables | Admin |
 | `/help` | Displays command instructions | All |
 
 ---
@@ -185,6 +187,8 @@ The Cloudflare version uses Telegram webhooks and a D1 database. Its settings ar
 The Cloudflare bot also supports `/disconnect <organization|owner/repo>`, `/toggle_event <event>`, `/verbosity <compact|detailed>`, and `/silent <on|off>`. In a private chat, prefix setting commands with the target chat ID. A repository administrator can configure a repository webhook, including for a personal repository. An organization owner can configure an organization webhook covering multiple repositories.
 
 Use `/workflow_alerts failures` to notify on failed and timed-out workflow runs, then send one recovery message when the same repository, workflow, and branch succeeds. `/workflow_alerts all` keeps notifications for all completed runs. Workflow notifications must also be enabled in `/menu` or with `/toggle_event workflows`. The Node bot supports the same alert modes through `/workflow_alerts` and `/settings`.
+
+Use `/quiet_hours 22:00 08:00 Africa/Nairobi` to hold routine notifications overnight, or `/digest daily 09:00 Africa/Nairobi` to collect them for a daily summary. The timezone must be an IANA name. CI failure and recovery alerts bypass the digest. Both deployments support `/quiet_hours off` and `/digest off`. Apply D1 migration `0004_digest.sql` before deploying this feature to Cloudflare.
 
 Send `/menu` or `/settings` in a group or channel to open the inline management menu. Administrators can remove subscriptions, toggle events, change verbosity and silent mode, and review connections. In a forum group, open `/menu` inside a topic to assign that topic to an event. From a private chat, use `/menu <chat-id>` to manage a group or channel. Adding a repository still uses `/subscribe owner/repo` because its name must be entered as text.
 
