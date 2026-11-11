@@ -35,6 +35,8 @@ async function bootstrap() {
         { command: 'workflow_alerts', description: 'Choose all CI runs or failures and recovery' },
         { command: 'quiet_hours', description: 'Pause routine alerts during set hours' },
         { command: 'digest', description: 'Set a daily activity digest' },
+        { command: 'test', description: 'Send a test notification' },
+        { command: 'delivery_status', description: 'Show recent delivery outcomes' },
         { command: 'help', description: 'Show bot usage instructions' },
       ]);
       console.log('✅ Telegram bot command menu registered.');
