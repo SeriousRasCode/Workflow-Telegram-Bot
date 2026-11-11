@@ -58,6 +58,8 @@ export function registerBotCommands(bot: Bot): void {
     help += `• <code>/workflow_alerts &lt;all|failures&gt;</code> &mdash; Choose CI alerts\n`;
     help += `• <code>/quiet_hours 22:00 08:00 Africa/Nairobi</code> &mdash; Pause routine alerts\n`;
     help += `• <code>/digest daily 09:00 Africa/Nairobi</code> &mdash; Send routine activity daily\n`;
+    help += `• <code>/test</code> &mdash; Send a test notification to this chat\n`;
+    help += `• <code>/delivery_status</code> &mdash; Show recent delivery outcomes\n`;
 
     await ctx.reply(help, { parse_mode: 'HTML' });
   });
@@ -99,6 +101,22 @@ export function registerBotCommands(bot: Bot): void {
     await ctx.reply(text, {
       parse_mode: 'HTML',
       message_thread_id: ctx.message?.message_thread_id,
+    });
+  });
+
+  bot.command('test', async (ctx) => {
+    if (!(await isChatAdmin(ctx))) { await ctx.reply('Only chat administrators can test delivery.'); return; }
+    const chat = store.getOrCreateChat(ctx.chat.id, ctx.chat.title || 'Chat', Boolean(ctx.chat.is_forum));
+    await ctx.reply(`✅ <b>Test notification delivered</b>\n\nChat: <code>${chat.chatId}</code>\nSubscribed repositories: <b>${chat.subscribedRepos.length}</b>\n\nThis confirms Telegram delivery. Use /status to review webhook settings.`, {
+      parse_mode: 'HTML', message_thread_id: ctx.message?.message_thread_id,
+    });
+  });
+
+  bot.command('delivery_status', async (ctx) => {
+    const rows = store.getDeliveryStatus(ctx.chat.id).slice(0, 5);
+    const details = rows.map(item => `• <code>${escapeHtml(item.repo)}</code> ${escapeHtml(item.eventType)}: <b>${escapeHtml(item.state)}</b>${item.detail ? ` (${escapeHtml(item.detail)})` : ''}`);
+    await ctx.reply(`<b>Recent GitHub deliveries</b>\n\n${details.join('\n') || 'No deliveries recorded yet.'}`, {
+      parse_mode: 'HTML', message_thread_id: ctx.message?.message_thread_id,
     });
   });
 
