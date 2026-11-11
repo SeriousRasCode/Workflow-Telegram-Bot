@@ -50,6 +50,7 @@ export function buildSettingsText(chat: ChatSettings): string {
   // Branch filter & verbosity
   text += `🌿 <b>Branch Filter:</b> ${chat.branchFilter.length > 0 ? chat.branchFilter.map((b) => `<code>${escapeHtml(b)}</code>`).join(', ') : '<i>All branches</i>'}\n`;
   text += `📝 <b>Verbosity:</b> <code>${chat.verbosity}</code>\n`;
+  text += `⚙️ <b>Workflow alerts:</b> <code>${chat.workflowAlerts === 'failures' ? 'failures and recovery' : 'all completions'}</code>\n`;
   text += `🔕 <b>Silent Notifications:</b> ${chat.silent ? '<b>Yes</b>' : '<b>No</b>'}\n`;
 
   return text;
@@ -68,6 +69,8 @@ export function buildMainMenuKeyboard(chat: ChatSettings, currentThreadId?: numb
   keyboard
     .text('🔔 Toggle Events', 'menu:events')
     .text('📝 Verbosity', 'menu:verbosity')
+    .row()
+    .text(`⚙️ CI: ${chat.workflowAlerts === 'failures' ? 'Failures' : 'All runs'}`, 'menu:workflow')
     .row()
     .text(chat.silent ? '🔔 Unmute Bot' : '🔕 Mute Bot (Silent)', 'menu:toggle_silent')
     .text('🗑️ Clear Topic Routes', 'menu:clear_topics')
