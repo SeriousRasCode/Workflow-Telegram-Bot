@@ -31,6 +31,7 @@ async function bootstrap() {
         { command: 'unsubscribe', description: 'Unsubscribe from repository' },
         { command: 'repos', description: 'List subscribed repositories' },
         { command: 'filter_branches', description: 'Set branch filter for push events' },
+        { command: 'workflow_alerts', description: 'Choose all CI runs or failures and recovery' },
         { command: 'help', description: 'Show bot usage instructions' },
       ]);
       console.log('✅ Telegram bot command menu registered.');

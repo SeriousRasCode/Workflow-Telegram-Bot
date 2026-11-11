@@ -69,6 +69,8 @@ export class SettingsStore {
         eventsEnabled: { ...DEFAULT_EVENTS_ENABLED },
         branchFilter: [],
         verbosity: config.defaultVerbosity,
+        workflowAlerts: 'all',
+        workflowFailures: {},
         silent: false,
         createdAt: now,
         updatedAt: now,

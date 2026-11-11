@@ -42,6 +42,8 @@ export interface ChatSettings {
   eventsEnabled: ChatEventsEnabled;
   branchFilter: string[]; // e.g. ['main', 'master'], empty array means all branches
   verbosity: 'compact' | 'detailed';
+  workflowAlerts?: 'all' | 'failures';
+  workflowFailures?: Record<string, boolean>;
   silent: boolean;
   createdAt: string;
   updatedAt: string;
