@@ -234,6 +234,7 @@ export class SettingsStore {
     const prevLength = chat.subscribedRepos.length;
     chat.subscribedRepos = chat.subscribedRepos.filter((r) => r.toLowerCase() !== cleaned);
     if (chat.subscribedRepos.length !== prevLength) {
+      delete chat.repositoryRules?.[cleaned];
       chat.updatedAt = new Date().toISOString();
       this.save();
       return true;
