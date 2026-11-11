@@ -16,7 +16,7 @@ const DEFAULT_EVENTS_ENABLED: ChatEventsEnabled = {
 
 export class SettingsStore {
   private filePath: string;
-  private data: StoreData = { chats: {}, deliveries: {}, version: 2 };
+  private data: StoreData = { chats: {}, deliveries: {}, digestItems: {}, version: 3 };
 
   constructor(dataDir: string = config.dataDir) {
     if (!fs.existsSync(dataDir)) {
@@ -35,6 +35,7 @@ export class SettingsStore {
           this.data.chats = {};
         }
         this.data.deliveries ||= {};
+        this.data.digestItems ||= {};
         // Earlier versions subscribed every chat to every repository implicitly.
         for (const chat of Object.values(this.data.chats)) {
           chat.subscribedRepos = (chat.subscribedRepos || []).filter((repo) => repo !== '*');
@@ -71,6 +72,8 @@ export class SettingsStore {
         verbosity: config.defaultVerbosity,
         workflowAlerts: 'all',
         workflowFailures: {},
+        quietHours: null,
+        dailyDigest: null,
         silent: false,
         createdAt: now,
         updatedAt: now,
@@ -99,6 +102,21 @@ export class SettingsStore {
 
   public getAllChats(): ChatSettings[] {
     return Object.values(this.data.chats);
+  }
+
+  public queueDigest(chatId: number, item: string): void {
+    (this.data.digestItems ||= {})[String(chatId)] ||= [];
+    this.data.digestItems![String(chatId)].push(item);
+    this.save();
+  }
+
+  public getDigestItems(chatId: number): string[] {
+    return [...(this.data.digestItems?.[String(chatId)] || [])];
+  }
+
+  public removeDigestItems(chatId: number, count: number): void {
+    this.data.digestItems?.[String(chatId)]?.splice(0, count);
+    this.save();
   }
 
   public wasDelivered(deliveryId: string, chatId: number): boolean {
