@@ -4,6 +4,7 @@ import { config } from '../config.js';
 import { EventType } from '../types/store.js';
 import { isChatAdmin, escapeHtml } from './utils.js';
 import { validTime, validTimeZone } from './digest.js';
+import { eventNames, topicNames, setRepositoryBranches, setRepositoryEvent, setRepositoryTopic, formatRepositoryRule } from './repository_rules.js';
 import {
   buildSettingsText,
   buildMainMenuKeyboard,
@@ -60,6 +61,10 @@ export function registerBotCommands(bot: Bot): void {
     help += `• <code>/digest daily 09:00 Africa/Nairobi</code> &mdash; Send routine activity daily\n`;
     help += `• <code>/test</code> &mdash; Send a test notification to this chat\n`;
     help += `• <code>/delivery_status</code> &mdash; Show recent delivery outcomes\n`;
+    help += `• <code>/repo_rules owner/repo</code> &mdash; Show repository overrides\n`;
+    help += `• <code>/repo_event owner/repo pushes off</code> &mdash; Override an event\n`;
+    help += `• <code>/repo_branches owner/repo main</code> &mdash; Override branches\n`;
+    help += `• <code>/repo_topic owner/repo pushes here</code> &mdash; Override a topic\n`;
 
     await ctx.reply(help, { parse_mode: 'HTML' });
   });
@@ -396,6 +401,45 @@ export function registerBotCommands(bot: Bot): void {
     store.updateChat(ctx.chat.id, { dailyDigest: { time, timeZone }, lastDigestDate: undefined });
     await ctx.reply(`Daily digest: ${time} (${timeZone}).`);
   });
+
+  async function manageRepositoryRule(ctx: Context, command: string): Promise<void> {
+    if (!(await isChatAdmin(ctx))) { await ctx.reply('Only chat administrators can manage repository rules.'); return; }
+    const parts = ctx.message?.text?.split(/\s+/).slice(1) || [];
+    const repo = (parts[0] || '').toLowerCase();
+    const chat = store.getOrCreateChat(ctx.chat!.id);
+    if (!chat.subscribedRepos.some(value => value.toLowerCase() === repo)) {
+      await ctx.reply('Use a subscribed repository in owner/repo format. Run /repos to see subscriptions.'); return;
+    }
+    if (command === 'repo_event') {
+      const event = parts[1] as keyof typeof chat.eventsEnabled;
+      const mode = parts[2] as 'on' | 'off' | 'inherit';
+      if (!eventNames.includes(event) || !['on', 'off', 'inherit'].includes(mode)) {
+        await ctx.reply('Usage: /repo_event owner/repo <event> <on|off|inherit>'); return;
+      }
+      setRepositoryEvent(chat, repo, event, mode);
+    } else if (command === 'repo_branches') {
+      const branches = parts.slice(1);
+      if (!branches.length) { await ctx.reply('Usage: /repo_branches owner/repo <branch...|all|inherit>'); return; }
+      setRepositoryBranches(chat, repo, branches[0] === 'inherit' ? undefined : branches[0] === 'all' ? [] : branches);
+    } else if (command === 'repo_topic') {
+      const event = parts[1] as EventType;
+      const value = parts[2];
+      if (!topicNames.includes(event) || !value) { await ctx.reply('Usage: /repo_topic owner/repo <event|all> <here|topic-id|general|inherit>'); return; }
+      let topic: number | null | undefined;
+      if (value === 'inherit') topic = undefined;
+      else if (value === 'general') topic = null;
+      else if (value === 'here' && ctx.message?.message_thread_id) topic = ctx.message.message_thread_id;
+      else if (/^[1-9]\d*$/.test(value)) topic = Number(value);
+      else { await ctx.reply('Use here inside a topic, a positive topic ID, general, or inherit.'); return; }
+      if (topic !== null && topic !== undefined && !Number.isSafeInteger(topic)) { await ctx.reply('Invalid topic ID.'); return; }
+      setRepositoryTopic(chat, repo, event, topic);
+    }
+    if (command !== 'repo_rules') store.updateChat(ctx.chat!.id, { repositoryRules: chat.repositoryRules });
+    await ctx.reply(`<b>Rules for ${escapeHtml(repo)}</b>\n\n<pre>${escapeHtml(formatRepositoryRule(chat, repo))}</pre>`, { parse_mode: 'HTML' });
+  }
+  for (const command of ['repo_rules', 'repo_event', 'repo_branches', 'repo_topic'] as const) {
+    bot.command(command, async ctx => manageRepositoryRule(ctx, command));
+  }
 
   // Handle Inline Keyboard Callback Queries
   bot.on('callback_query:data', async (ctx) => {
