@@ -54,6 +54,7 @@ export function registerBotCommands(bot: Bot): void {
     help += `• <code>/repos</code> &mdash; List subscribed repositories\n`;
     help += `• <code>/filter_branches &lt;b1&gt; &lt;b2&gt;</code> &mdash; Only notify for specific branches\n`;
     help += `• <code>/filter_branches all</code> &mdash; Notify for all branches\n`;
+    help += `• <code>/workflow_alerts &lt;all|failures&gt;</code> &mdash; Choose CI alerts\n`;
 
     await ctx.reply(help, { parse_mode: 'HTML' });
   });
@@ -327,6 +328,20 @@ export function registerBotCommands(bot: Bot): void {
     );
   });
 
+  bot.command('workflow_alerts', async (ctx) => {
+    if (!(await isChatAdmin(ctx))) {
+      await ctx.reply('Only chat administrators can change workflow alerts.');
+      return;
+    }
+    const mode = ctx.message?.text?.split(/\s+/)[1];
+    if (mode !== 'all' && mode !== 'failures') {
+      await ctx.reply('Usage: /workflow_alerts <all|failures>');
+      return;
+    }
+    store.updateChat(ctx.chat.id, { workflowAlerts: mode });
+    await ctx.reply(`Workflow alerts: ${mode}. Enable workflow events in /settings to receive them.`);
+  });
+
   // Handle Inline Keyboard Callback Queries
   bot.on('callback_query:data', async (ctx) => {
     const data = ctx.callbackQuery.data;
@@ -411,6 +426,14 @@ export function registerBotCommands(bot: Bot): void {
         reply_markup: buildMainMenuKeyboard(store.getOrCreateChat(chatId)),
       });
       await ctx.answerCallbackQuery({ text: `Verbosity set to ${newVerbosity}` });
+    } else if (data === 'menu:workflow') {
+      const mode = chat.workflowAlerts === 'failures' ? 'all' : 'failures';
+      store.updateChat(chatId, { workflowAlerts: mode });
+      await ctx.editMessageText(buildSettingsText(store.getOrCreateChat(chatId)), {
+        parse_mode: 'HTML',
+        reply_markup: buildMainMenuKeyboard(store.getOrCreateChat(chatId)),
+      });
+      await ctx.answerCallbackQuery({ text: `Workflow alerts: ${mode}` });
     } else if (data === 'menu:clear_topics') {
       store.updateChat(chatId, { topics: {}, topicNames: {} });
       await ctx.editMessageText(
