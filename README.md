@@ -168,6 +168,8 @@ The allowlists control which repository events each chat may receive, including 
 | `/workflow_alerts <all|failures>` | Choose all completed CI runs or failures with recovery alerts | Admin |
 | `/quiet_hours <start> <end> <timezone>` | Buffer routine notifications during local quiet hours; `/quiet_hours off` disables | Admin |
 | `/digest daily <time> <timezone>` | Send routine events in a daily digest; `/digest off` disables | Admin |
+| `/test` | Send a test notification and show connection readiness | Admin |
+| `/delivery_status` | Show the five most recent GitHub delivery outcomes | All |
 | `/help` | Displays command instructions | All |
 
 ---
@@ -189,6 +191,8 @@ The Cloudflare bot also supports `/disconnect <organization|owner/repo>`, `/togg
 Use `/workflow_alerts failures` to notify on failed and timed-out workflow runs, then send one recovery message when the same repository, workflow, and branch succeeds. `/workflow_alerts all` keeps notifications for all completed runs. Workflow notifications must also be enabled in `/menu` or with `/toggle_event workflows`. The Node bot supports the same alert modes through `/workflow_alerts` and `/settings`.
 
 Use `/quiet_hours 22:00 08:00 Africa/Nairobi` to hold routine notifications overnight, or `/digest daily 09:00 Africa/Nairobi` to collect them for a daily summary. The timezone must be an IANA name. CI failure and recovery alerts bypass the digest. Both deployments support `/quiet_hours off` and `/digest off`. Apply D1 migration `0004_digest.sql` before deploying this feature to Cloudflare.
+
+Use `/test` in a group or topic to check Telegram delivery. Cloudflare also shows the number of confirmed GitHub webhook connections; a signed GitHub ping confirms a connection. Use `/delivery_status` to see whether recent signed GitHub events were delivered, queued for a digest, filtered, disabled, or failed and awaiting retry. In a private chat with the Cloudflare bot, use `/test <chat-id>` or `/delivery_status <chat-id>` for a managed group. Apply D1 migration `0005_delivery_status.sql` before deploying this feature.
 
 Send `/menu` or `/settings` in a group or channel to open the inline management menu. Administrators can remove subscriptions, toggle events, change verbosity and silent mode, and review connections. In a forum group, open `/menu` inside a topic to assign that topic to an event. From a private chat, use `/menu <chat-id>` to manage a group or channel. Adding a repository still uses `/subscribe owner/repo` because its name must be entered as text.
 
