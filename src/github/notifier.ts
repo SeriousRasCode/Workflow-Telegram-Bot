@@ -1,6 +1,7 @@
 import { bot } from '../bot/instance.js';
 import { store } from '../storage/store.js';
 import { DispatchedEvent } from './dispatcher.js';
+import { selectWorkflowAlert, recordWorkflowAlert } from './workflow_alerts.js';
 
 export async function broadcastGitHubEvent(event: DispatchedEvent, deliveryId?: string): Promise<number> {
   const targetChats = store.getChatsForRepo(event.repoFullName);
@@ -45,10 +46,11 @@ export async function broadcastGitHubEvent(event: DispatchedEvent, deliveryId?: 
     }
 
     // 4. Format the message for this chat's verbosity
-    const messageHtml = event.format(chat.verbosity);
-    if (!messageHtml) {
+    const alert = selectWorkflowAlert(event, chat);
+    if (!alert) {
       continue;
     }
+    const messageHtml = alert.message;
 
     // 5. Send message to Telegram
     try {
@@ -62,6 +64,10 @@ export async function broadcastGitHubEvent(event: DispatchedEvent, deliveryId?: 
       });
       deliveredCount++;
       if (deliveryId) store.recordDelivery(deliveryId, chat.chatId);
+      if (alert.failureKey || alert.clearKey) {
+        recordWorkflowAlert(chat, alert);
+        store.updateChat(chat.chatId, { workflowFailures: chat.workflowFailures });
+      }
     } catch (err: any) {
       console.error(`Failed to send message to chat ${chat.chatId} (${chat.chatTitle}):`, err.message || err);
       // If thread not found (topic was closed or deleted), fallback to general topic if topicId was set
@@ -73,6 +79,10 @@ export async function broadcastGitHubEvent(event: DispatchedEvent, deliveryId?: 
           });
           deliveredCount++;
           if (deliveryId) store.recordDelivery(deliveryId, chat.chatId);
+          if (alert.failureKey || alert.clearKey) {
+            recordWorkflowAlert(chat, alert);
+            store.updateChat(chat.chatId, { workflowFailures: chat.workflowFailures });
+          }
         } catch (fallbackErr) {
           console.error(`Fallback send also failed for chat ${chat.chatId}:`, fallbackErr);
         }
