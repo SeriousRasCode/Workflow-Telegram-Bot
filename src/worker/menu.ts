@@ -34,7 +34,8 @@ export function buildMenu(view: MenuView, chat: ChatSettings, connections: Conne
     rows.push([button(id, '↻ Refresh', 'home')]);
   } else if (view === 'repos') {
     text = `<b>📦 Repositories</b>\n\n${chat.subscribedRepos.length ? chat.subscribedRepos.map(r => `• <code>${esc(r)}</code>`).join('\n') : 'None subscribed yet.'}` +
-      `\n\nTo add one, send <code>/subscribe owner/repo</code> in this chat. For a channel, you can also DM the bot <code>/subscribe ${id} owner/repo</code>.`;
+      `\n\nTo add one, send <code>/subscribe owner/repo</code> in this chat. For a channel, you can also DM the bot <code>/subscribe ${id} owner/repo</code>.` +
+      '\nFor overrides, use <code>/repo_rules owner/repo</code>, <code>/repo_event</code>, <code>/repo_branches</code>, or <code>/repo_topic</code>.';
     chat.subscribedRepos.slice(0, 12).forEach((repo, index) => rows.push([button(id, `Remove ${repo.slice(0, 28)}`, `unsub:${index}:${repoKey(repo)}`)]));
     rows.push(back(id));
   } else if (view === 'events') {

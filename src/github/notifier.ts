@@ -3,6 +3,7 @@ import { store } from '../storage/store.js';
 import { DispatchedEvent } from './dispatcher.js';
 import { selectWorkflowAlert, recordWorkflowAlert } from './workflow_alerts.js';
 import { digestDue, digestItem, digestMessages, shouldQueueDigest } from '../bot/digest.js';
+import { effectiveSettings } from '../bot/repository_rules.js';
 
 export async function broadcastGitHubEvent(event: DispatchedEvent, deliveryId?: string): Promise<number> {
   const targetChats = store.getChatsForRepo(event.repoFullName);
@@ -13,7 +14,8 @@ export async function broadcastGitHubEvent(event: DispatchedEvent, deliveryId?: 
 
   let deliveredCount = 0;
 
-  for (const chat of targetChats) {
+  for (const targetChat of targetChats) {
+    const chat = effectiveSettings(targetChat, event.repoFullName);
     if (deliveryId && store.wasDelivered(deliveryId, chat.chatId)) continue;
     const status = (state: 'delivered' | 'digest' | 'filtered' | 'disabled' | 'failed', detail?: string) => {
       if (deliveryId) store.recordDeliveryStatus(chat.chatId, { deliveryId, repo: event.repoFullName,
@@ -46,7 +48,9 @@ export async function broadcastGitHubEvent(event: DispatchedEvent, deliveryId?: 
 
     // 3. Resolve target topic thread ID
     let topicId: number | undefined;
-    if (event.eventType !== 'all' && chat.topics[event.eventType] !== undefined && chat.topics[event.eventType] !== null) {
+    if (chat.topics[event.eventType] === null) {
+      topicId = undefined;
+    } else if (event.eventType !== 'all' && chat.topics[event.eventType] !== undefined) {
       topicId = chat.topics[event.eventType]!;
     } else if (chat.topics.all !== undefined && chat.topics.all !== null) {
       topicId = chat.topics.all!;

@@ -37,6 +37,10 @@ async function bootstrap() {
         { command: 'digest', description: 'Set a daily activity digest' },
         { command: 'test', description: 'Send a test notification' },
         { command: 'delivery_status', description: 'Show recent delivery outcomes' },
+        { command: 'repo_rules', description: 'Show rules for one repository' },
+        { command: 'repo_event', description: 'Override an event for one repository' },
+        { command: 'repo_branches', description: 'Override branches for one repository' },
+        { command: 'repo_topic', description: 'Override topic routing for one repository' },
         { command: 'help', description: 'Show bot usage instructions' },
       ]);
       console.log('✅ Telegram bot command menu registered.');

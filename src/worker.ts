@@ -4,6 +4,7 @@ import type { D1Database, ExecutionContext, ScheduledEvent } from '@cloudflare/w
 import { buildMenu, repoKey, type MenuView, type ConnectionSummary } from './worker/menu.js';
 import { selectWorkflowAlert, recordWorkflowAlert } from './github/workflow_alerts.js';
 import { digestDue, digestItem, digestMessages, shouldQueueDigest, validTime, validTimeZone } from './bot/digest.js';
+import { effectiveSettings, eventNames, topicNames, setRepositoryBranches, setRepositoryEvent, setRepositoryTopic, formatRepositoryRule } from './bot/repository_rules.js';
 
 interface Env {
   DB: D1Database;
@@ -117,6 +118,7 @@ async function handleMenuCallback(env: Env, update: TgUpdate): Promise<Response>
     if (!Number.isSafeInteger(index) || !repo || repoKey(repo) !== parts[4]) { await answer('Menu changed. Open /menu again.', true); return reply('ok'); }
     await env.DB.prepare('DELETE FROM subscriptions WHERE chat_id=? AND repo=?').bind(String(targetId), repo.toLowerCase()).run();
     settings.subscribedRepos.splice(index, 1);
+    delete settings.repositoryRules?.[repo.toLowerCase()];
     await saveSettings(env, settings);
     view = 'repos';
   } else if (action === 'sub') {
@@ -263,6 +265,7 @@ async function handleTelegram(request: Request, env: Env): Promise<Response> {
     const repo = (parts[0] || '').toLowerCase();
     await env.DB.prepare('DELETE FROM subscriptions WHERE chat_id=? AND repo=?').bind(String(targetId), repo).run();
     settings.subscribedRepos = settings.subscribedRepos.filter(x => x.toLowerCase() !== repo);
+    delete settings.repositoryRules?.[repo];
     await saveSettings(env, settings);
     await respond(`Removed <code>${escape(repo)}</code> from this chat.`, true); return reply('ok');
   }
@@ -273,9 +276,11 @@ async function handleTelegram(request: Request, env: Env): Promise<Response> {
     if (scope.includes('/')) {
       await env.DB.prepare('DELETE FROM subscriptions WHERE chat_id=? AND repo=?').bind(String(targetId), scope).run();
       settings.subscribedRepos = settings.subscribedRepos.filter(x => x.toLowerCase() !== scope);
+      delete settings.repositoryRules?.[scope];
     } else {
       await env.DB.prepare('DELETE FROM subscriptions WHERE chat_id=? AND repo LIKE ?').bind(String(targetId), `${scope}/%`).run();
       settings.subscribedRepos = settings.subscribedRepos.filter(x => !x.toLowerCase().startsWith(`${scope}/`));
+      for (const repo of Object.keys(settings.repositoryRules || {})) if (repo.startsWith(`${scope}/`)) delete settings.repositoryRules?.[repo];
     }
     await saveSettings(env, settings);
     await respond(`Disconnected ${scope} and removed its repository subscriptions.`); return reply('ok');
@@ -346,6 +351,43 @@ async function handleTelegram(request: Request, env: Env): Promise<Response> {
     await respond(settings.dailyDigest ? `Daily digest: ${settings.dailyDigest.time} (${settings.dailyDigest.timeZone}).` : 'Daily digest off. Pending items will send after quiet hours.');
     return reply('ok');
   }
+  if (['/repo_event', '/repo_branches', '/repo_topic', '/repo_rules'].includes(command)) {
+    const repo = (parts[0] || '').toLowerCase();
+    if (!repoPattern.test(repo) || !settings.subscribedRepos.some(value => value.toLowerCase() === repo)) {
+      await respond('Use a subscribed repository in owner/repo format. Run /repos to see subscriptions.'); return reply('ok');
+    }
+    if (command === '/repo_rules') {
+      await respond(`<b>Rules for ${escape(repo)}</b>\n\n<pre>${escape(formatRepositoryRule(settings, repo))}</pre>`, true);
+      return reply('ok');
+    }
+    if (command === '/repo_event') {
+      const event = parts[1] as keyof ChatSettings['eventsEnabled'];
+      const mode = parts[2] as 'on' | 'off' | 'inherit';
+      if (!eventNames.includes(event) || !['on', 'off', 'inherit'].includes(mode)) {
+        await respond('Usage: /repo_event owner/repo <event> <on|off|inherit>'); return reply('ok');
+      }
+      setRepositoryEvent(settings, repo, event, mode);
+    } else if (command === '/repo_branches') {
+      const branches = parts.slice(1);
+      if (!branches.length) { await respond('Usage: /repo_branches owner/repo <branch...|all|inherit>'); return reply('ok'); }
+      setRepositoryBranches(settings, repo, branches[0] === 'inherit' ? undefined : branches[0] === 'all' ? [] : branches);
+    } else {
+      const event = parts[1] as EventType;
+      const value = parts[2];
+      if (!topicNames.includes(event) || !value) { await respond('Usage: /repo_topic owner/repo <event|all> <here|topic-id|general|inherit>'); return reply('ok'); }
+      let topic: number | null | undefined;
+      if (value === 'inherit') topic = undefined;
+      else if (value === 'general') topic = null;
+      else if (value === 'here' && targetId === chat.id && thread) topic = thread;
+      else if (/^[1-9]\d*$/.test(value)) topic = Number(value);
+      else { await respond('Use here inside a topic, a positive topic ID, general, or inherit.'); return reply('ok'); }
+      if (topic !== null && topic !== undefined && !Number.isSafeInteger(topic)) { await respond('Invalid topic ID.'); return reply('ok'); }
+      setRepositoryTopic(settings, repo, event, topic);
+    }
+    await saveSettings(env, settings);
+    await respond(`<b>Rules for ${escape(repo)}</b>\n\n<pre>${escape(formatRepositoryRule(settings, repo))}</pre>`, true);
+    return reply('ok');
+  }
   if (command === '/test') {
     const targetSettings = await getSettings(env, target);
     const connections = await env.DB.prepare('SELECT COUNT(*) AS total,SUM(verified) AS verified FROM connections WHERE chat_id=?')
@@ -393,13 +435,14 @@ async function handleGitHub(request: Request, env: Env, chatId: string, scope: s
   const event = parseAndDispatchGitHubEvent(eventName, payload);
   if (!event) { await recordStatus(env, chatId, deliveryId, repo, eventName, 'filtered', 'Unsupported event'); return reply('ignored'); }
   const settings = await getSettings(env, { id: Number(chatId), type: 'supergroup' });
-  if (event.eventType !== 'all' && !settings.eventsEnabled[event.eventType]) { await recordStatus(env, chatId, deliveryId, repo, eventName, 'disabled'); return reply('disabled'); }
-  if (event.branchName && settings.branchFilter.length && !settings.branchFilter.some(x => x.endsWith('*') ? event.branchName!.startsWith(x.slice(0, -1)) : x === event.branchName)) {
+  const effective = effectiveSettings(settings, repo);
+  if (event.eventType !== 'all' && !effective.eventsEnabled[event.eventType]) { await recordStatus(env, chatId, deliveryId, repo, eventName, 'disabled'); return reply('disabled'); }
+  if (event.branchName && effective.branchFilter.length && !effective.branchFilter.some(x => x.endsWith('*') ? event.branchName!.startsWith(x.slice(0, -1)) : x === event.branchName)) {
     await recordStatus(env, chatId, deliveryId, repo, eventName, 'filtered', 'Branch filter'); return reply('filtered');
   }
-  const alert = selectWorkflowAlert(event, settings);
+  const alert = selectWorkflowAlert(event, effective);
   if (!alert) { await recordStatus(env, chatId, deliveryId, repo, eventName, 'filtered', 'Event action or alert mode'); return reply('ignored'); }
-  if (shouldQueueDigest(settings, Boolean(alert.failureKey || alert.clearKey))) {
+  if (shouldQueueDigest(effective, Boolean(alert.failureKey || alert.clearKey))) {
     await env.DB.batch([
       env.DB.prepare('INSERT OR IGNORE INTO digest_items(delivery_id,chat_id,message,created_at) VALUES(?,?,?,?)')
         .bind(deliveryId, chatId, digestItem(event.repoFullName, alert.message), Date.now()),
@@ -409,7 +452,7 @@ async function handleGitHub(request: Request, env: Env, chatId: string, scope: s
     await recordStatus(env, chatId, deliveryId, repo, eventName, 'digest', 'Waiting for digest');
     return reply('queued for digest', 202);
   }
-  const thread = settings.topics[event.eventType] ?? settings.topics.all ?? null;
+  const thread = effective.topics[event.eventType] === null ? null : effective.topics[event.eventType] ?? effective.topics.all ?? null;
   await env.DB.prepare('INSERT OR IGNORE INTO jobs(delivery_id,chat_id,message,thread_id,silent,created_at) VALUES(?,?,?,?,?,?)')
     .bind(deliveryId, chatId, alert.message, thread, settings.silent ? 1 : 0, Date.now()).run();
   await recordStatus(env, chatId, deliveryId, repo, eventName, 'queued');
