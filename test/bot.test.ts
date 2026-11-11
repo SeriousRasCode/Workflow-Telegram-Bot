@@ -124,6 +124,14 @@ describe('Store and Topic Routing', () => {
     assert.equal(reloaded.wasDelivered('12345678-1234-1234-1234-123456789abc', -100999999999), false);
   });
 
+  it('keeps recent delivery outcomes across restarts', () => {
+    store.recordDeliveryStatus(-100123456789, { deliveryId: 'first', repo: 'my-org/api', eventType: 'push', state: 'queued' });
+    store.recordDeliveryStatus(-100123456789, { deliveryId: 'first', repo: 'my-org/api', eventType: 'push', state: 'delivered' });
+    const reloaded = new SettingsStore(testDir);
+    assert.equal(reloaded.getDeliveryStatus(-100123456789).length, 1);
+    assert.equal(reloaded.getDeliveryStatus(-100123456789)[0].state, 'delivered');
+  });
+
   it('removes legacy wildcard subscriptions on load', () => {
     store.getOrCreateChat(-100123456789);
     store.updateChat(-100123456789, { subscribedRepos: ['*', 'my-org/api'] });
