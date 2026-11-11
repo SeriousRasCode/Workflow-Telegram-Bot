@@ -56,5 +56,15 @@ export interface StoreData {
   chats: Record<string, ChatSettings>; // key: chatId string
   deliveries?: Record<string, Record<string, number>>; // delivery ID -> chat ID -> timestamp
   digestItems?: Record<string, string[]>;
+  deliveryStatus?: Record<string, DeliveryStatus[]>;
   version: number;
+}
+
+export interface DeliveryStatus {
+  deliveryId: string;
+  repo: string;
+  eventType: string;
+  state: 'delivered' | 'queued' | 'digest' | 'filtered' | 'disabled' | 'failed';
+  detail?: string;
+  updatedAt: string;
 }
