@@ -12,6 +12,7 @@ export interface DispatchedEvent {
   eventType: EventType;
   repoFullName: string;
   branchName?: string;
+  workflow?: { key: string; conclusion: string | null; name: string; url: string };
   format: (verbosity: 'compact' | 'detailed') => string | null;
 }
 
@@ -66,10 +67,17 @@ export function parseAndDispatchGitHubEvent(
     }
 
     case 'workflow_run': {
+      const run = payload.workflow_run;
       return {
         eventType: 'workflows',
         repoFullName,
-        branchName: payload.workflow_run?.head_branch,
+        branchName: run?.head_branch,
+        workflow: run && payload.action === 'completed' ? {
+          key: `${repoFullName.toLowerCase()}\n${run.workflow_id}\n${run.head_branch || ''}`,
+          conclusion: run.conclusion,
+          name: run.name || payload.workflow?.name || 'Workflow',
+          url: run.html_url,
+        } : undefined,
         format: () => formatWorkflowEvent(payload),
       };
     }
