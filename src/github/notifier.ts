@@ -2,6 +2,7 @@ import { bot } from '../bot/instance.js';
 import { store } from '../storage/store.js';
 import { DispatchedEvent } from './dispatcher.js';
 import { selectWorkflowAlert, recordWorkflowAlert } from './workflow_alerts.js';
+import { digestDue, digestItem, digestMessages, shouldQueueDigest } from '../bot/digest.js';
 
 export async function broadcastGitHubEvent(event: DispatchedEvent, deliveryId?: string): Promise<number> {
   const targetChats = store.getChatsForRepo(event.repoFullName);
@@ -51,6 +52,11 @@ export async function broadcastGitHubEvent(event: DispatchedEvent, deliveryId?: 
       continue;
     }
     const messageHtml = alert.message;
+    if (shouldQueueDigest(chat, Boolean(alert.failureKey || alert.clearKey))) {
+      store.queueDigest(chat.chatId, digestItem(event.repoFullName, messageHtml));
+      if (deliveryId) store.recordDelivery(deliveryId, chat.chatId);
+      continue;
+    }
 
     // 5. Send message to Telegram
     try {
@@ -91,4 +97,37 @@ export async function broadcastGitHubEvent(event: DispatchedEvent, deliveryId?: 
   }
 
   return deliveredCount;
+}
+
+let digestRunning = false;
+export async function flushDigests(): Promise<void> {
+  if (digestRunning) return;
+  digestRunning = true;
+  try {
+    for (const chat of store.getAllChats()) {
+      const due = digestDue(chat);
+      if (!due.due) continue;
+      const items = store.getDigestItems(chat.chatId);
+      if (!items.length) {
+        if (due.date) store.updateChat(chat.chatId, { lastDigestDate: due.date });
+        continue;
+      }
+      const messages = digestMessages(items);
+      let sent = 0;
+      for (const message of messages) {
+        try {
+          await bot.api.sendMessage(chat.chatId, message.text, { parse_mode: 'HTML', disable_notification: chat.silent,
+            message_thread_id: chat.topics.all ?? undefined });
+          store.removeDigestItems(chat.chatId, message.count);
+          sent++;
+        } catch (err) {
+          console.error(`Digest delivery failed for chat ${chat.chatId}:`, err);
+          break;
+        }
+      }
+      if (sent === messages.length) {
+        if (due.date) store.updateChat(chat.chatId, { lastDigestDate: due.date });
+      }
+    }
+  } finally { digestRunning = false; }
 }
