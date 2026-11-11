@@ -3,6 +3,7 @@ import type { ChatSettings, EventType } from './types/store.js';
 import type { D1Database, ExecutionContext, ScheduledEvent } from '@cloudflare/workers-types';
 import { buildMenu, repoKey, type MenuView, type ConnectionSummary } from './worker/menu.js';
 import { selectWorkflowAlert, recordWorkflowAlert } from './github/workflow_alerts.js';
+import { digestDue, digestItem, digestMessages, shouldQueueDigest, validTime, validTimeZone } from './bot/digest.js';
 
 interface Env {
   DB: D1Database;
@@ -45,7 +46,8 @@ function defaultSettings(chat: TgChat): ChatSettings {
   const now = new Date().toISOString();
   return { chatId: chat.id, chatTitle: chat.title || 'Chat', isForum: Boolean(chat.is_forum), subscribedRepos: [], topics: {}, topicNames: {},
     eventsEnabled: { pushes: true, prs: true, issues: true, comments: false, releases: true, workflows: false, stars: true, forks: true },
-    branchFilter: [], verbosity: 'detailed', workflowAlerts: 'all', workflowFailures: {}, silent: false, createdAt: now, updatedAt: now };
+    branchFilter: [], verbosity: 'detailed', workflowAlerts: 'all', workflowFailures: {}, quietHours: null, dailyDigest: null,
+    silent: false, createdAt: now, updatedAt: now };
 }
 
 async function getSettings(env: Env, chat: TgChat): Promise<ChatSettings> {
@@ -312,6 +314,33 @@ async function handleTelegram(request: Request, env: Env): Promise<Response> {
     await saveSettings(env, settings);
     await respond(`Workflow alerts: ${settings.workflowAlerts}. Enable workflow events in /menu to receive them.`); return reply('ok');
   }
+  if (command === '/quiet_hours') {
+    if (parts[0] === 'off') settings.quietHours = null;
+    else {
+      const [start, end, timeZone] = parts;
+      if (!validTime(start || '') || !validTime(end || '') || start === end || !validTimeZone(timeZone || '')) {
+        await respond('Usage: /quiet_hours <HH:MM> <HH:MM> <IANA timezone> or /quiet_hours off. Example: /quiet_hours 22:00 08:00 Africa/Nairobi'); return reply('ok');
+      }
+      settings.quietHours = { start, end, timeZone };
+    }
+    await saveSettings(env, settings);
+    await respond(settings.quietHours ? `Quiet hours: ${settings.quietHours.start}–${settings.quietHours.end} (${settings.quietHours.timeZone}).` : 'Quiet hours off.');
+    return reply('ok');
+  }
+  if (command === '/digest') {
+    if (parts[0] === 'off') settings.dailyDigest = null;
+    else {
+      const [mode, time, timeZone] = parts;
+      if (mode !== 'daily' || !validTime(time || '') || !validTimeZone(timeZone || '')) {
+        await respond('Usage: /digest daily <HH:MM> <IANA timezone> or /digest off. Example: /digest daily 09:00 Africa/Nairobi'); return reply('ok');
+      }
+      settings.dailyDigest = { time, timeZone };
+      settings.lastDigestDate = undefined;
+    }
+    await saveSettings(env, settings);
+    await respond(settings.dailyDigest ? `Daily digest: ${settings.dailyDigest.time} (${settings.dailyDigest.timeZone}).` : 'Daily digest off. Pending items will send after quiet hours.');
+    return reply('ok');
+  }
   await respond('Unknown command. Use /help.');
   return reply('ok');
 }
@@ -346,6 +375,15 @@ async function handleGitHub(request: Request, env: Env, chatId: string, scope: s
   if (event.branchName && settings.branchFilter.length && !settings.branchFilter.some(x => x.endsWith('*') ? event.branchName!.startsWith(x.slice(0, -1)) : x === event.branchName)) return reply('filtered');
   const alert = selectWorkflowAlert(event, settings);
   if (!alert) return reply('ignored');
+  if (shouldQueueDigest(settings, Boolean(alert.failureKey || alert.clearKey))) {
+    await env.DB.batch([
+      env.DB.prepare('INSERT OR IGNORE INTO digest_items(delivery_id,chat_id,message,created_at) VALUES(?,?,?,?)')
+        .bind(deliveryId, chatId, digestItem(event.repoFullName, alert.message), Date.now()),
+      env.DB.prepare('INSERT OR IGNORE INTO deliveries(delivery_id,chat_id,sent_at) VALUES(?,?,?)')
+        .bind(deliveryId, chatId, Date.now()),
+    ]);
+    return reply('queued for digest', 202);
+  }
   const thread = settings.topics[event.eventType] ?? settings.topics.all ?? null;
   await env.DB.prepare('INSERT OR IGNORE INTO jobs(delivery_id,chat_id,message,thread_id,silent,created_at) VALUES(?,?,?,?,?,?)')
     .bind(deliveryId, chatId, alert.message, thread, settings.silent ? 1 : 0, Date.now()).run();
@@ -354,6 +392,32 @@ async function handleGitHub(request: Request, env: Env, chatId: string, scope: s
     await saveSettings(env, settings);
   }
   return reply('queued', 202);
+}
+
+async function queueDueDigests(env: Env): Promise<void> {
+  const rows = await env.DB.prepare('SELECT chat_id,settings FROM chats').all<{ chat_id: string; settings: string }>();
+  for (const row of rows.results) {
+    const settings = JSON.parse(row.settings) as ChatSettings;
+    const due = digestDue(settings);
+    if (!due.due) continue;
+    const items = await env.DB.prepare('SELECT delivery_id,message FROM digest_items WHERE chat_id=? ORDER BY created_at LIMIT 200')
+      .bind(row.chat_id).all<{ delivery_id: string; message: string }>();
+    let offset = 0;
+    for (const chunk of digestMessages(items.results.map(item => item.message))) {
+      const batch = items.results.slice(offset, offset + chunk.count);
+      const id = `digest-${batch[0].delivery_id}`;
+      await env.DB.batch([
+        env.DB.prepare('INSERT OR IGNORE INTO jobs(delivery_id,chat_id,message,thread_id,silent,created_at) VALUES(?,?,?,?,?,?)')
+          .bind(id, row.chat_id, chunk.text, settings.topics.all ?? null, settings.silent ? 1 : 0, Date.now()),
+        ...batch.map(item => env.DB.prepare('DELETE FROM digest_items WHERE delivery_id=? AND chat_id=?').bind(item.delivery_id, row.chat_id)),
+      ]);
+      offset += chunk.count;
+    }
+    if (due.date) {
+      const left = await env.DB.prepare('SELECT 1 FROM digest_items WHERE chat_id=? LIMIT 1').bind(row.chat_id).first();
+      if (!left) { settings.lastDigestDate = due.date; await saveSettings(env, settings); }
+    }
+  }
 }
 
 async function drain(env: Env): Promise<void> {
@@ -395,5 +459,5 @@ export default {
       return reply('Not found', 404);
     } catch (err) { console.error(err); return reply('Internal error', 500); }
   },
-  async scheduled(_event: ScheduledEvent, env: Env): Promise<void> { await drain(env); },
+  async scheduled(_event: ScheduledEvent, env: Env): Promise<void> { await queueDueDigests(env); await drain(env); },
 };
