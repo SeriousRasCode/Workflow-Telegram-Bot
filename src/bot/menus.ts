@@ -16,6 +16,7 @@ export function buildSettingsText(chat: ChatSettings): string {
     }
   }
   text += `\n`;
+  text += `🔧 <b>Repository overrides:</b> ${Object.keys(chat.repositoryRules || {}).length} <i>(/repo_rules owner/repo)</i>\n\n`;
 
   // Topic Routing
   text += `🏷️ <b>Topic Routing Table:</b>\n`;
