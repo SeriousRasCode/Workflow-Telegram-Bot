@@ -165,6 +165,7 @@ The allowlists control which repository events each chat may receive, including 
 | `/repos` | Lists all subscribed repositories | All |
 | `/filter_branches <branches>` | Filter notifications to specific branches (e.g. `/filter_branches main develop`) | Admin |
 | `/filter_branches all` | Clears branch filter (notifies on all branches) | Admin |
+| `/workflow_alerts <all|failures>` | Choose all completed CI runs or failures with recovery alerts | Admin |
 | `/help` | Displays command instructions | All |
 
 ---
@@ -182,6 +183,8 @@ The Cloudflare version uses Telegram webhooks and a D1 database. Its settings ar
 5. In a group or channel, run `/status` to get its chat ID. In a private chat with the bot, run `/connect <chat-id> <owner/repo>` for one repository, or `/connect <chat-id> <organization>` for an entire organization. The bot returns a unique GitHub webhook URL and secret. Add the webhook to that repository or organization. Run `/subscribe <owner/repo>` in the group or channel, or `/subscribe <chat-id> <owner/repo>` in the private chat. The subscription saves immediately; notifications begin when signed GitHub deliveries arrive.
 
 The Cloudflare bot also supports `/disconnect <organization|owner/repo>`, `/toggle_event <event>`, `/verbosity <compact|detailed>`, and `/silent <on|off>`. In a private chat, prefix setting commands with the target chat ID. A repository administrator can configure a repository webhook, including for a personal repository. An organization owner can configure an organization webhook covering multiple repositories.
+
+Use `/workflow_alerts failures` to notify on failed and timed-out workflow runs, then send one recovery message when the same repository, workflow, and branch succeeds. `/workflow_alerts all` keeps notifications for all completed runs. Workflow notifications must also be enabled in `/menu` or with `/toggle_event workflows`. The Node bot supports the same alert modes through `/workflow_alerts` and `/settings`.
 
 Send `/menu` or `/settings` in a group or channel to open the inline management menu. Administrators can remove subscriptions, toggle events, change verbosity and silent mode, and review connections. In a forum group, open `/menu` inside a topic to assign that topic to an event. From a private chat, use `/menu <chat-id>` to manage a group or channel. Adding a repository still uses `/subscribe owner/repo` because its name must be entered as text.
 
