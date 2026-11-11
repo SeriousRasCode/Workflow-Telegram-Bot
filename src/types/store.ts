@@ -44,6 +44,9 @@ export interface ChatSettings {
   verbosity: 'compact' | 'detailed';
   workflowAlerts?: 'all' | 'failures';
   workflowFailures?: Record<string, boolean>;
+  quietHours?: { start: string; end: string; timeZone: string } | null;
+  dailyDigest?: { time: string; timeZone: string } | null;
+  lastDigestDate?: string;
   silent: boolean;
   createdAt: string;
   updatedAt: string;
@@ -52,5 +55,6 @@ export interface ChatSettings {
 export interface StoreData {
   chats: Record<string, ChatSettings>; // key: chatId string
   deliveries?: Record<string, Record<string, number>>; // delivery ID -> chat ID -> timestamp
+  digestItems?: Record<string, string[]>;
   version: number;
 }
