@@ -6,6 +6,7 @@ import { config } from '../config.js';
 const DEFAULT_EVENTS_ENABLED: ChatEventsEnabled = {
   pushes: true,
   prs: true,
+  reviews: false,
   issues: true,
   comments: false, // off by default to avoid high frequency notification spam
   releases: true,
@@ -40,6 +41,7 @@ export class SettingsStore {
         // Earlier versions subscribed every chat to every repository implicitly.
         for (const chat of Object.values(this.data.chats)) {
           chat.subscribedRepos = (chat.subscribedRepos || []).filter((repo) => repo !== '*');
+          chat.eventsEnabled = { ...DEFAULT_EVENTS_ENABLED, ...chat.eventsEnabled };
         }
       }
     } catch (err) {
