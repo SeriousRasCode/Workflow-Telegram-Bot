@@ -60,67 +60,69 @@ export function buildSettingsText(chat: ChatSettings): string {
   return text;
 }
 
-export function buildMainMenuKeyboard(chat: ChatSettings, currentThreadId?: number): InlineKeyboard {
+const targetAction = (chatId: number, action: string) => `target:${chatId}:${action}`;
+
+export function buildMainMenuKeyboard(chat: ChatSettings, currentThreadId?: number, targetChatId = chat.chatId): InlineKeyboard {
   const keyboard = new InlineKeyboard();
 
   if (currentThreadId !== undefined) {
     // User opened menu from inside a specific topic!
     keyboard
-      .text(`🎯 Assign This Topic (#${currentThreadId})`, `menu:assign_topic:${currentThreadId}`)
+      .text(`🎯 Assign This Topic (#${currentThreadId})`, targetAction(targetChatId, `menu:assign_topic:${currentThreadId}`))
       .row();
   }
 
   keyboard
-    .text('🔔 Toggle Events', 'menu:events')
-    .text('📝 Verbosity', 'menu:verbosity')
+    .text('🔔 Toggle Events', targetAction(targetChatId, 'menu:events'))
+    .text('📝 Verbosity', targetAction(targetChatId, 'menu:verbosity'))
     .row()
-    .text(`⚙️ CI: ${chat.workflowAlerts === 'failures' ? 'Failures' : 'All runs'}`, 'menu:workflow')
+    .text(`⚙️ CI: ${chat.workflowAlerts === 'failures' ? 'Failures' : 'All runs'}`, targetAction(targetChatId, 'menu:workflow'))
     .row()
-    .text(chat.silent ? '🔔 Unmute Bot' : '🔕 Mute Bot (Silent)', 'menu:toggle_silent')
-    .text('🗑️ Clear Topic Routes', 'menu:clear_topics')
+    .text(chat.silent ? '🔔 Unmute Bot' : '🔕 Mute Bot (Silent)', targetAction(targetChatId, 'menu:toggle_silent'))
+    .text('🗑️ Clear Topic Routes', targetAction(targetChatId, 'menu:clear_topics'))
     .row()
-    .text('🔄 Refresh Status', 'menu:refresh');
+    .text('🔄 Refresh Status', targetAction(targetChatId, 'menu:refresh'));
 
   return keyboard;
 }
 
-export function buildEventsMenuKeyboard(chat: ChatSettings): InlineKeyboard {
+export function buildEventsMenuKeyboard(chat: ChatSettings, targetChatId = chat.chatId): InlineKeyboard {
   const keyboard = new InlineKeyboard();
   const e = chat.eventsEnabled;
 
   keyboard
-    .text(`${e.pushes ? '✅' : '❌'} Pushes`, 'toggle_event:pushes')
-    .text(`${e.prs ? '✅' : '❌'} Pull Requests`, 'toggle_event:prs')
+    .text(`${e.pushes ? '✅' : '❌'} Pushes`, targetAction(targetChatId, 'toggle_event:pushes'))
+    .text(`${e.prs ? '✅' : '❌'} Pull Requests`, targetAction(targetChatId, 'toggle_event:prs'))
     .row()
-    .text(`${e.reviews ? '✅' : '❌'} PR Reviews`, 'toggle_event:reviews')
-    .text(`${e.issues ? '✅' : '❌'} Issues`, 'toggle_event:issues')
+    .text(`${e.reviews ? '✅' : '❌'} PR Reviews`, targetAction(targetChatId, 'toggle_event:reviews'))
+    .text(`${e.issues ? '✅' : '❌'} Issues`, targetAction(targetChatId, 'toggle_event:issues'))
     .row()
-    .text(`${e.comments ? '✅' : '❌'} Comments`, 'toggle_event:comments')
+    .text(`${e.comments ? '✅' : '❌'} Comments`, targetAction(targetChatId, 'toggle_event:comments'))
     .row()
-    .text(`${e.releases ? '✅' : '❌'} Releases`, 'toggle_event:releases')
-    .text(`${e.workflows ? '✅' : '❌'} Workflows`, 'toggle_event:workflows')
+    .text(`${e.releases ? '✅' : '❌'} Releases`, targetAction(targetChatId, 'toggle_event:releases'))
+    .text(`${e.workflows ? '✅' : '❌'} Workflows`, targetAction(targetChatId, 'toggle_event:workflows'))
     .row()
-    .text(`${e.stars ? '✅' : '❌'} Stars`, 'toggle_event:stars')
-    .text(`${e.forks ? '✅' : '❌'} Forks`, 'toggle_event:forks')
+    .text(`${e.stars ? '✅' : '❌'} Stars`, targetAction(targetChatId, 'toggle_event:stars'))
+    .text(`${e.forks ? '✅' : '❌'} Forks`, targetAction(targetChatId, 'toggle_event:forks'))
     .row()
-    .text('« Back to Settings', 'menu:main');
+    .text('« Back to Settings', targetAction(targetChatId, 'menu:main'));
 
   return keyboard;
 }
 
-export function buildAssignTopicKeyboard(threadId: number): InlineKeyboard {
+export function buildAssignTopicKeyboard(threadId: number, targetChatId: number): InlineKeyboard {
   return new InlineKeyboard()
-    .text('🌐 All Events', `assign_thread:${threadId}:all`)
-    .text('🔨 Pushes', `assign_thread:${threadId}:pushes`)
+    .text('🌐 All Events', targetAction(targetChatId, `assign_thread:${threadId}:all`))
+    .text('🔨 Pushes', targetAction(targetChatId, `assign_thread:${threadId}:pushes`))
     .row()
-    .text('🔀 Pull Requests', `assign_thread:${threadId}:prs`)
-    .text('⚠️ Issues', `assign_thread:${threadId}:issues`)
+    .text('🔀 Pull Requests', targetAction(targetChatId, `assign_thread:${threadId}:prs`))
+    .text('⚠️ Issues', targetAction(targetChatId, `assign_thread:${threadId}:issues`))
     .row()
-    .text('🚀 Releases', `assign_thread:${threadId}:releases`)
-    .text('⚙️ Workflows', `assign_thread:${threadId}:workflows`)
+    .text('🚀 Releases', targetAction(targetChatId, `assign_thread:${threadId}:releases`))
+    .text('⚙️ Workflows', targetAction(targetChatId, `assign_thread:${threadId}:workflows`))
     .row()
-    .text('💬 Comments', `assign_thread:${threadId}:comments`)
-    .text('⭐ Stars/Forks', `assign_thread:${threadId}:stars`)
+    .text('💬 Comments', targetAction(targetChatId, `assign_thread:${threadId}:comments`))
+    .text('⭐ Stars/Forks', targetAction(targetChatId, `assign_thread:${threadId}:stars`))
     .row()
-    .text('« Cancel', 'menu:main');
+    .text('« Cancel', targetAction(targetChatId, 'menu:main'));
 }
