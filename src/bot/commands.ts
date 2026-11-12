@@ -1,4 +1,4 @@
-import { Bot, Context } from 'grammy';
+import { Bot, Context, InlineKeyboard } from 'grammy';
 import { store } from '../storage/store.js';
 import { config } from '../config.js';
 import { EventType } from '../types/store.js';
@@ -34,7 +34,7 @@ export function registerBotCommands(bot: Bot): void {
     welcome += `   • Secret: <code>${config.webhookSecret ? '(your configured secret)' : '(none configured)'}</code>\n\n`;
     welcome += `Type /help to see all available commands or /settings for interactive configuration.`;
 
-    await ctx.reply(welcome, { parse_mode: 'HTML' });
+    await ctx.reply(welcome, { parse_mode: 'HTML', reply_markup: new InlineKeyboard().text('⚙️ Open menu', 'menu:main') });
   });
 
   // /help command
@@ -70,7 +70,7 @@ export function registerBotCommands(bot: Bot): void {
   });
 
   // /settings command
-  bot.command(['settings', 'config'], async (ctx) => {
+  bot.command(['menu', 'settings', 'config'], async (ctx) => {
     const chat = store.getOrCreateChat(
       ctx.chat.id,
       ctx.chat.title || ctx.from?.first_name || 'Direct Chat',
