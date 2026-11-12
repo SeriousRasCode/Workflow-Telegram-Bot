@@ -1,6 +1,6 @@
 import type { ChatSettings, EventType } from '../types/store.js';
 
-export type MenuView = 'home' | 'repos' | 'events' | 'topics' | 'prefs' | 'connections';
+export type MenuView = 'home' | 'repos' | 'events' | 'topics' | 'prefs' | 'connections' | 'failed';
 export type MenuButton = { text: string; callback_data: string } | { text: string; url: string };
 export type Menu = { text: string; reply_markup: { inline_keyboard: MenuButton[][] } };
 export type ConnectionSummary = { owner: string; verified: number };
@@ -19,7 +19,7 @@ export function repoKey(repo: string): string {
   return (hash >>> 0).toString(36);
 }
 
-export function buildMenu(view: MenuView, chat: ChatSettings, connections: ConnectionSummary[], threadId?: number): Menu {
+export function buildMenu(view: MenuView, chat: ChatSettings, connections: ConnectionSummary[], threadId?: number, failedCount = 0): Menu {
   const id = chat.chatId;
   const rows: MenuButton[][] = [];
   let text = '';
@@ -30,6 +30,7 @@ export function buildMenu(view: MenuView, chat: ChatSettings, connections: Conne
     rows.push([button(id, '📦 Repositories', 'repos'), button(id, '🔔 Events', 'events')]);
     rows.push([button(id, '🎯 Topics', 'topics'), button(id, '⚙️ Preferences', 'prefs')]);
     rows.push([button(id, '🔗 Connections', 'connections')]);
+    rows.push([button(id, `🧯 Failed deliveries (${failedCount})`, 'failed')]);
     if (threadId) rows.push([button(id, `Assign this topic #${threadId}`, `topics:${threadId}`)]);
     rows.push([button(id, '↻ Refresh', 'home')]);
   } else if (view === 'repos') {
@@ -66,6 +67,11 @@ export function buildMenu(view: MenuView, chat: ChatSettings, connections: Conne
       '\n\nSet with <code>/quiet_hours 22:00 08:00 Africa/Nairobi</code> and <code>/digest daily 09:00 Africa/Nairobi</code>. Send <code>/quiet_hours off</code> or <code>/digest off</code> to disable.';
     rows.push([button(id, `Style: ${chat.verbosity}`, 'verbosity'), button(id, `Silent: ${chat.silent ? 'On' : 'Off'}`, 'silent')]);
     rows.push([button(id, `CI: ${chat.workflowAlerts === 'failures' ? 'Failures' : 'All runs'}`, 'workflow')]);
+    rows.push(back(id));
+  } else if (view === 'failed') {
+    text = `<b>🧯 Failed deliveries</b>\n\n${failedCount ? `${failedCount} message(s) exhausted automatic retries.` : 'No failed messages.'}` +
+      '\n\nFix the bot permissions or destination, then retry them below.';
+    if (failedCount) rows.push([button(id, `↻ Retry failed (${failedCount})`, 'retry_failed')]);
     rows.push(back(id));
   } else {
     text = `<b>🔗 GitHub connections</b>\n\n${connections.length ? connections.map(c => `• <code>${esc(c.owner)}</code> ${c.verified ? '✅ confirmed' : '⏳ unconfirmed'}`).join('\n') : 'No connections yet.'}` +
