@@ -73,7 +73,8 @@ async function recordStatus(env: Env, chatId: string, deliveryId: string, repo: 
 async function menuFor(env: Env, chat: TgChat, view: MenuView, threadId?: number) {
   const settings = await getSettings(env, chat);
   const rows = await env.DB.prepare('SELECT owner,verified FROM connections WHERE chat_id=? ORDER BY owner').bind(String(chat.id)).all<ConnectionSummary>();
-  return buildMenu(view, settings, rows.results, threadId);
+  const failed = await env.DB.prepare('SELECT COUNT(*) AS count FROM failed_jobs WHERE chat_id=?').bind(String(chat.id)).first<{ count: number }>();
+  return buildMenu(view, settings, rows.results, threadId, failed?.count || 0);
 }
 
 async function handleMenuCallback(env: Env, update: TgUpdate): Promise<Response> {
@@ -94,9 +95,23 @@ async function handleMenuCallback(env: Env, update: TgUpdate): Promise<Response>
   let view: MenuView = 'home';
   let threadId = message.message_thread_id;
   const action = parts[2];
-  if (['home', 'repos', 'events', 'topics', 'prefs', 'connections'].includes(action)) {
+  if (['home', 'repos', 'events', 'topics', 'prefs', 'connections', 'failed'].includes(action)) {
     view = action as MenuView;
     if (action === 'topics' && parts[3]) threadId = Number(parts[3]);
+  } else if (action === 'retry_failed') {
+    const jobs = await env.DB.prepare('SELECT * FROM failed_jobs WHERE chat_id=? ORDER BY failed_at LIMIT 50')
+      .bind(String(targetId)).all<Job>();
+    for (const job of jobs.results) {
+      await env.DB.batch([
+        env.DB.prepare('INSERT OR IGNORE INTO jobs(delivery_id,chat_id,message,thread_id,silent,attempts,next_attempt_at,created_at) VALUES(?,?,?,?,?,0,?,?)')
+          .bind(job.delivery_id, job.chat_id, job.message, job.thread_id, job.silent, Date.now(), Date.now()),
+        env.DB.prepare('DELETE FROM failed_jobs WHERE delivery_id=? AND chat_id=?').bind(job.delivery_id, job.chat_id),
+        env.DB.prepare("UPDATE delivery_status SET state='queued',detail='Manual retry',updated_at=? WHERE chat_id=? AND delivery_id=?")
+          .bind(Date.now(), job.chat_id, job.delivery_id),
+      ]);
+    }
+    view = 'failed';
+    await answer(`Queued ${jobs.results.length} message(s) for retry.`);
   } else if (action === 'event') {
     const event = parts[3] as keyof ChatSettings['eventsEnabled'];
     if (!event || !(event in settings.eventsEnabled)) { await answer('Unknown event.', true); return reply('ok'); }
@@ -232,7 +247,7 @@ async function handleTelegram(request: Request, env: Env): Promise<Response> {
   if (command === '/start' || command === '/help') {
     const text = '<b>GitHub notifications setup</b>\n\n1. Add me to your group or channel.\n2. Send <code>/status</code> there to get its chat ID.\n3. Message me privately: <code>/connect CHAT_ID owner/repo</code> for one repository, or <code>/connect CHAT_ID organization</code> for an entire organization.\n4. Add the GitHub webhook using the URL and secret I send you.\n5. Subscribe with <code>/subscribe owner/repo</code>.\n\nUse <code>/test</code> to check Telegram delivery and <code>/delivery_status</code> for recent GitHub outcomes. Open the menu below or use /menu.';
     await telegram(env, 'sendMessage', { chat_id: chat.id, text, parse_mode: 'HTML', ...(thread ? { message_thread_id: thread } : {}),
-      reply_markup: { inline_keyboard: [[{ text: '⚙️ Open menu', callback_data: `m:${chat.id}:home` }]] } });
+      reply_markup: { keyboard: [[{ text: '/menu' }, { text: '/status' }], [{ text: '/failed_deliveries' }, { text: '/retry_failed' }]], resize_keyboard: true, is_persistent: true } });
     return reply('ok');
   }
   if (command === '/status') {
