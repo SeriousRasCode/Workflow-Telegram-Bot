@@ -7,6 +7,7 @@ import { formatReleaseEvent } from './formatters/release.js';
 import { formatWorkflowEvent } from './formatters/workflow.js';
 import { formatStarEvent, formatForkEvent, formatPingEvent } from './formatters/repo_activity.js';
 import { formatBranch } from '../bot/utils.js';
+import { formatPullRequestReview } from './formatters/review.js';
 
 export interface DispatchedEvent {
   eventType: EventType;
@@ -39,6 +40,15 @@ export function parseAndDispatchGitHubEvent(
         repoFullName,
         branchName: payload.pull_request?.base?.ref,
         format: () => formatPullRequestEvent(payload),
+      };
+    }
+
+    case 'pull_request_review': {
+      return {
+        eventType: 'reviews',
+        repoFullName,
+        branchName: payload.pull_request?.base?.ref,
+        format: () => formatPullRequestReview(payload),
       };
     }
 

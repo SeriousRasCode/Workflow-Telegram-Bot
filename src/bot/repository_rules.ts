@@ -1,6 +1,6 @@
 import type { ChatSettings, ChatEventsEnabled, EventType, RepositoryRule } from '../types/store.js';
 
-export const eventNames: (keyof ChatEventsEnabled)[] = ['pushes', 'prs', 'issues', 'comments', 'releases', 'workflows', 'stars', 'forks'];
+export const eventNames: (keyof ChatEventsEnabled)[] = ['pushes', 'prs', 'reviews', 'issues', 'comments', 'releases', 'workflows', 'stars', 'forks'];
 export const topicNames: EventType[] = ['all', ...eventNames];
 
 export function effectiveSettings(chat: ChatSettings, repo: string): ChatSettings {

@@ -41,6 +41,7 @@ async function bootstrap() {
         { command: 'repo_event', description: 'Override an event for one repository' },
         { command: 'repo_branches', description: 'Override branches for one repository' },
         { command: 'repo_topic', description: 'Override topic routing for one repository' },
+        { command: 'toggle_event', description: 'Toggle a GitHub event (/toggle_event reviews)' },
         { command: 'help', description: 'Show bot usage instructions' },
       ]);
       console.log('✅ Telegram bot command menu registered.');

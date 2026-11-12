@@ -6,7 +6,7 @@ export type Menu = { text: string; reply_markup: { inline_keyboard: MenuButton[]
 export type ConnectionSummary = { owner: string; verified: number };
 
 const eventLabels: Record<Exclude<EventType, 'all'>, string> = {
-  pushes: 'Pushes', prs: 'Pull requests', issues: 'Issues', comments: 'Comments',
+    pushes: 'Pushes', prs: 'Pull requests', reviews: 'PR reviews', issues: 'Issues', comments: 'Comments',
   releases: 'Releases', workflows: 'Workflows', stars: 'Stars', forks: 'Forks',
 };
 const esc = (value: string) => value.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');

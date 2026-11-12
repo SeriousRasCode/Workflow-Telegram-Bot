@@ -144,6 +144,7 @@ export function registerBotCommands(bot: Bot): void {
           `• <code>all</code> (All events)\n` +
           `• <code>pushes</code> (Git pushes & commits)\n` +
           `• <code>prs</code> (Pull requests)\n` +
+          `• <code>reviews</code> (Pull request reviews)\n` +
           `• <code>issues</code> (Issues)\n` +
           `• <code>comments</code> (Issue & PR comments)\n` +
           `• <code>releases</code> (Releases & tags)\n` +
@@ -158,6 +159,7 @@ export function registerBotCommands(bot: Bot): void {
       'all',
       'pushes',
       'prs',
+      'reviews',
       'issues',
       'comments',
       'releases',

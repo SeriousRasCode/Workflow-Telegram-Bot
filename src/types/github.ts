@@ -112,6 +112,14 @@ export interface GitHubPullRequestEvent {
   sender: GitHubUser;
 }
 
+export interface GitHubPullRequestReviewEvent {
+  action: 'submitted' | 'edited' | 'dismissed';
+  review: { id: number; state: 'approved' | 'changes_requested' | 'commented' | 'dismissed' | 'pending'; body: string; html_url: string };
+  pull_request: { number: number; title: string; html_url: string };
+  repository: GitHubRepository;
+  sender: GitHubUser;
+}
+
 export interface GitHubIssue {
   id: number;
   number: number;

@@ -68,6 +68,7 @@ describe('Store and Topic Routing', () => {
     assert.equal(chat.isForum, true);
     assert.equal(chat.eventsEnabled.pushes, true);
     assert.equal(chat.eventsEnabled.prs, true);
+    assert.equal(chat.eventsEnabled.reviews, false);
     assert.equal(chat.eventsEnabled.issues, true);
     assert.equal(chat.eventsEnabled.comments, false);
     assert.equal(chat.verbosity, 'detailed');
@@ -322,5 +323,13 @@ describe('Event Dispatcher', () => {
 
     assert.ok(dispatched);
     assert.equal(dispatched.eventType, 'prs');
+  });
+
+  it('dispatches submitted pull request reviews to the review category', () => {
+    const event = parseAndDispatchGitHubEvent('pull_request_review', {
+      action: 'submitted', repository: { full_name: 'acme/api' },
+      pull_request: { base: { ref: 'main' } }, review: { state: 'approved' },
+    });
+    assert.equal(event?.eventType, 'reviews');
   });
 });
