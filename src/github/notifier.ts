@@ -106,12 +106,36 @@ export async function broadcastGitHubEvent(event: DispatchedEvent, deliveryId?: 
           }
         } catch (fallbackErr) {
           console.error(`Fallback send also failed for chat ${chat.chatId}:`, fallbackErr);
+          store.recordFailedDelivery(chat.chatId, { deliveryId: deliveryId || `${Date.now()}-${Math.random()}`, repo: event.repoFullName,
+            eventType: event.eventType, message: messageHtml, silent: chat.silent, attempts: 1, lastError: 'Telegram send failed', updatedAt: new Date().toISOString() });
         }
+      } else {
+        store.recordFailedDelivery(chat.chatId, { deliveryId: deliveryId || `${Date.now()}-${Math.random()}`, repo: event.repoFullName,
+          eventType: event.eventType, message: messageHtml, threadId: topicId, silent: chat.silent, attempts: 1,
+          lastError: 'Telegram send failed', updatedAt: new Date().toISOString() });
       }
     }
   }
 
   return deliveredCount;
+}
+
+export async function retryFailedDeliveries(chatId: number): Promise<{ retried: number; succeeded: number }> {
+  const items = store.getFailedDeliveries(chatId);
+  let succeeded = 0;
+  for (const item of items) {
+    try {
+      await bot.api.sendMessage(chatId, item.message, { parse_mode: 'HTML', disable_notification: item.silent,
+        message_thread_id: item.threadId });
+      store.removeFailedDelivery(chatId, item.deliveryId);
+      store.recordDeliveryStatus(chatId, { deliveryId: item.deliveryId, repo: item.repo, eventType: item.eventType, state: 'delivered', detail: 'Manual retry' });
+      store.recordDelivery(item.deliveryId, chatId);
+      succeeded++;
+    } catch {
+      store.recordFailedDelivery(chatId, { ...item, attempts: item.attempts + 1, lastError: 'Telegram send failed' });
+    }
+  }
+  return { retried: items.length, succeeded };
 }
 
 let digestRunning = false;

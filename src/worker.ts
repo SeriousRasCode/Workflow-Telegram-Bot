@@ -205,6 +205,8 @@ async function handleTelegram(request: Request, env: Env): Promise<Response> {
       { command: 'repos', description: 'List followed repositories' },
       { command: 'test', description: 'Send a test notification' },
       { command: 'delivery_status', description: 'Show recent delivery outcomes' },
+      { command: 'failed_deliveries', description: 'List Telegram messages needing retry' },
+      { command: 'retry_failed', description: 'Retry failed Telegram messages' },
       { command: 'quiet_hours', description: 'Configure quiet hours' },
       { command: 'digest', description: 'Configure a daily digest' },
       { command: 'help', description: 'Show setup instructions' },
@@ -425,6 +427,28 @@ async function handleTelegram(request: Request, env: Env): Promise<Response> {
     await respond(`<b>Recent GitHub deliveries</b>\n\n${details.join('\n') || 'No deliveries recorded yet.'}`, true);
     return reply('ok');
   }
+  if (command === '/failed_deliveries') {
+    const rows = await env.DB.prepare('SELECT f.delivery_id,COALESCE(d.repo,\'digest\') AS repo,COALESCE(d.event_type,\'digest\') AS event_type,f.attempts FROM failed_jobs f LEFT JOIN delivery_status d ON d.chat_id=f.chat_id AND d.delivery_id=f.delivery_id WHERE f.chat_id=? ORDER BY f.failed_at DESC LIMIT 5')
+      .bind(String(targetId)).all<{ delivery_id: string; repo: string; event_type: string; attempts: number }>();
+    const lines = rows.results.map(item => `• <code>${escape(item.repo)}</code> ${escape(item.event_type)} · ${item.attempts} attempts`);
+    await respond(`<b>Failed deliveries</b>\n\n${lines.join('\n') || 'No failed messages.'}${lines.length ? '\n\nUse /retry_failed to retry them.' : ''}`, true);
+    return reply('ok');
+  }
+  if (command === '/retry_failed') {
+    const rows = await env.DB.prepare('SELECT * FROM failed_jobs WHERE chat_id=? ORDER BY failed_at LIMIT 50')
+      .bind(String(targetId)).all<Job & { last_error: string; failed_at: number }>();
+    for (const job of rows.results) {
+      await env.DB.batch([
+        env.DB.prepare('INSERT OR IGNORE INTO jobs(delivery_id,chat_id,message,thread_id,silent,attempts,next_attempt_at,created_at) VALUES(?,?,?,?,?,0,?,?)')
+          .bind(job.delivery_id, job.chat_id, job.message, job.thread_id, job.silent, Date.now(), Date.now()),
+        env.DB.prepare('DELETE FROM failed_jobs WHERE delivery_id=? AND chat_id=?').bind(job.delivery_id, job.chat_id),
+        env.DB.prepare("UPDATE delivery_status SET state='queued',detail='Manual retry',updated_at=? WHERE chat_id=? AND delivery_id=?")
+          .bind(Date.now(), job.chat_id, job.delivery_id),
+      ]);
+    }
+    await respond(`Queued ${rows.results.length} failed message(s) for retry.`);
+    return reply('ok');
+  }
   await respond('Unknown command. Use /help.');
   return reply('ok');
 }
@@ -527,11 +551,21 @@ async function drain(env: Env): Promise<void> {
       await env.DB.prepare('DELETE FROM jobs WHERE delivery_id=? AND chat_id=?').bind(job.delivery_id, job.chat_id).run();
     } catch (err) {
       console.error('Telegram delivery failed', job.chat_id, err);
-      await env.DB.prepare("UPDATE delivery_status SET state='failed',detail='Retry scheduled',updated_at=? WHERE chat_id=? AND (delivery_id=? OR delivery_id IN (SELECT delivery_id FROM digest_job_items WHERE job_id=? AND chat_id=?))")
-        .bind(Date.now(), job.chat_id, job.delivery_id, job.delivery_id, job.chat_id).run();
-      const delay = Math.min(60 * 60_000, 2 ** Math.min(job.attempts, 10) * 60_000);
-      await env.DB.prepare('UPDATE jobs SET attempts=attempts+1,next_attempt_at=? WHERE delivery_id=? AND chat_id=?')
-        .bind(now + delay, job.delivery_id, job.chat_id).run();
+      if (job.attempts + 1 >= 8) {
+        await env.DB.batch([
+          env.DB.prepare('INSERT OR REPLACE INTO failed_jobs(delivery_id,chat_id,message,thread_id,silent,attempts,last_error,created_at,failed_at) SELECT delivery_id,chat_id,message,thread_id,silent,attempts+1,\'Telegram send failed\',created_at,? FROM jobs WHERE delivery_id=? AND chat_id=?')
+            .bind(Date.now(), job.delivery_id, job.chat_id),
+          env.DB.prepare("UPDATE delivery_status SET state='failed',detail='Moved to failed deliveries after 8 attempts',updated_at=? WHERE chat_id=? AND (delivery_id=? OR delivery_id IN (SELECT delivery_id FROM digest_job_items WHERE job_id=? AND chat_id=?))")
+            .bind(Date.now(), job.chat_id, job.delivery_id, job.delivery_id, job.chat_id),
+          env.DB.prepare('DELETE FROM jobs WHERE delivery_id=? AND chat_id=?').bind(job.delivery_id, job.chat_id),
+        ]);
+      } else {
+        await env.DB.prepare("UPDATE delivery_status SET state='failed',detail='Retry scheduled',updated_at=? WHERE chat_id=? AND (delivery_id=? OR delivery_id IN (SELECT delivery_id FROM digest_job_items WHERE job_id=? AND chat_id=?))")
+          .bind(Date.now(), job.chat_id, job.delivery_id, job.delivery_id, job.chat_id).run();
+        const delay = Math.min(60 * 60_000, 2 ** Math.min(job.attempts, 10) * 60_000);
+        await env.DB.prepare('UPDATE jobs SET attempts=attempts+1,next_attempt_at=? WHERE delivery_id=? AND chat_id=?')
+          .bind(now + delay, job.delivery_id, job.chat_id).run();
+      }
     }
   }
   await env.DB.prepare('DELETE FROM deliveries WHERE sent_at<?').bind(now - 7 * 86400_000).run();

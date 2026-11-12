@@ -5,6 +5,7 @@ import { EventType } from '../types/store.js';
 import { isChatAdmin, escapeHtml } from './utils.js';
 import { validTime, validTimeZone } from './digest.js';
 import { eventNames, topicNames, setRepositoryBranches, setRepositoryEvent, setRepositoryTopic, formatRepositoryRule } from './repository_rules.js';
+import { retryFailedDeliveries } from '../github/notifier.js';
 import {
   buildSettingsText,
   buildMainMenuKeyboard,
@@ -61,6 +62,8 @@ export function registerBotCommands(bot: Bot): void {
     help += `• <code>/digest daily 09:00 Africa/Nairobi</code> &mdash; Send routine activity daily\n`;
     help += `• <code>/test</code> &mdash; Send a test notification to this chat\n`;
     help += `• <code>/delivery_status</code> &mdash; Show recent delivery outcomes\n`;
+    help += `• <code>/failed_deliveries</code> &mdash; List messages needing retry\n`;
+    help += `• <code>/retry_failed</code> &mdash; Retry failed Telegram sends\n`;
     help += `• <code>/repo_rules owner/repo</code> &mdash; Show repository overrides\n`;
     help += `• <code>/repo_event owner/repo pushes off</code> &mdash; Override an event\n`;
     help += `• <code>/repo_branches owner/repo main</code> &mdash; Override branches\n`;
@@ -123,6 +126,18 @@ export function registerBotCommands(bot: Bot): void {
     await ctx.reply(`<b>Recent GitHub deliveries</b>\n\n${details.join('\n') || 'No deliveries recorded yet.'}`, {
       parse_mode: 'HTML', message_thread_id: ctx.message?.message_thread_id,
     });
+  });
+
+  bot.command('failed_deliveries', async (ctx) => {
+    const failed = store.getFailedDeliveries(ctx.chat.id).slice(0, 5);
+    const lines = failed.map(item => `• <code>${escapeHtml(item.repo)}</code> ${escapeHtml(item.eventType)} · ${item.attempts} attempts`);
+    await ctx.reply(`<b>Failed deliveries</b>\n\n${lines.join('\n') || 'No failed messages.'}\n\n${failed.length ? 'Use /retry_failed to retry them.' : ''}`, { parse_mode: 'HTML' });
+  });
+
+  bot.command('retry_failed', async (ctx) => {
+    if (!(await isChatAdmin(ctx))) { await ctx.reply('Only chat administrators can retry failed deliveries.'); return; }
+    const result = await retryFailedDeliveries(ctx.chat.id);
+    await ctx.reply(`Retried ${result.retried} failed message(s); ${result.succeeded} delivered successfully.`);
   });
 
   // /set_topic or /settopic command

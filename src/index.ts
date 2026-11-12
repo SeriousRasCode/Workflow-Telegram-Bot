@@ -38,6 +38,8 @@ async function bootstrap() {
         { command: 'digest', description: 'Set a daily activity digest' },
         { command: 'test', description: 'Send a test notification' },
         { command: 'delivery_status', description: 'Show recent delivery outcomes' },
+        { command: 'failed_deliveries', description: 'List Telegram messages needing retry' },
+        { command: 'retry_failed', description: 'Retry failed Telegram messages' },
         { command: 'repo_rules', description: 'Show rules for one repository' },
         { command: 'repo_event', description: 'Override an event for one repository' },
         { command: 'repo_branches', description: 'Override branches for one repository' },

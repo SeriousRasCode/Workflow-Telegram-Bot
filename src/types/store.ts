@@ -67,6 +67,7 @@ export interface StoreData {
   deliveries?: Record<string, Record<string, number>>; // delivery ID -> chat ID -> timestamp
   digestItems?: Record<string, string[]>;
   deliveryStatus?: Record<string, DeliveryStatus[]>;
+  failedDeliveries?: Record<string, FailedDelivery[]>;
   version: number;
 }
 
@@ -76,5 +77,17 @@ export interface DeliveryStatus {
   eventType: string;
   state: 'delivered' | 'queued' | 'digest' | 'filtered' | 'disabled' | 'failed';
   detail?: string;
+  updatedAt: string;
+}
+
+export interface FailedDelivery {
+  deliveryId: string;
+  repo: string;
+  eventType: string;
+  message: string;
+  threadId?: number;
+  silent: boolean;
+  attempts: number;
+  lastError: string;
   updatedAt: string;
 }
