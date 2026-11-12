@@ -14,6 +14,10 @@ interface Env {
 type TgChat = { id: number; type: string; title?: string; is_forum?: boolean };
 type TgUpdate = { message?: { chat: TgChat; from?: { id: number }; text?: string; message_thread_id?: number }; channel_post?: { chat: TgChat; from?: { id: number }; text?: string; message_thread_id?: number }; callback_query?: { id: string; from: { id: number }; message?: { chat: TgChat; message_id: number; message_thread_id?: number }; data?: string } };
 type Job = { delivery_id: string; chat_id: string; message: string; thread_id: number | null; silent: number; attempts: number };
+const commandKeyboard = { keyboard: [
+  [{ text: '📋 Menu', style: 'primary' }, { text: '📊 Status', style: 'primary' }],
+  [{ text: '🚨 Failed deliveries', style: 'danger' }, { text: '🔁 Retry failed', style: 'success' }],
+], resize_keyboard: true, is_persistent: true };
 
 const events: EventType[] = ['all', 'pushes', 'prs', 'reviews', 'issues', 'comments', 'releases', 'workflows', 'stars', 'forks'];
 const repoPattern = /^[a-z0-9][a-z0-9-]*\/[a-z0-9._-]+$/i;
@@ -200,7 +204,13 @@ async function handleTelegram(request: Request, env: Env): Promise<Response> {
     return handleMenuCallback(env, update);
   }
   if (!msg?.text) return reply('ok');
-  const parts = msg.text.trim().split(/\s+/);
+  const keyboardActions: Record<string, string> = {
+    '📋 Menu': '/menu',
+    '📊 Status': '/status',
+    '🚨 Failed deliveries': '/failed_deliveries',
+    '🔁 Retry failed': '/retry_failed',
+  };
+  const parts = (keyboardActions[msg.text.trim()] || msg.text.trim()).split(/\s+/);
   const command = parts.shift()?.split('@')[0].toLowerCase();
   if (!command?.startsWith('/')) return reply('ok');
   const userId = msg.from?.id;
@@ -247,7 +257,7 @@ async function handleTelegram(request: Request, env: Env): Promise<Response> {
   if (command === '/start' || command === '/help') {
     const text = '<b>GitHub notifications setup</b>\n\n1. Add me to your group or channel.\n2. Send <code>/status</code> there to get its chat ID.\n3. Message me privately: <code>/connect CHAT_ID owner/repo</code> for one repository, or <code>/connect CHAT_ID organization</code> for an entire organization.\n4. Add the GitHub webhook using the URL and secret I send you.\n5. Subscribe with <code>/subscribe owner/repo</code>.\n\nUse <code>/test</code> to check Telegram delivery and <code>/delivery_status</code> for recent GitHub outcomes. Open the menu below or use /menu.';
     await telegram(env, 'sendMessage', { chat_id: chat.id, text, parse_mode: 'HTML', ...(thread ? { message_thread_id: thread } : {}),
-      reply_markup: { keyboard: [[{ text: '/menu' }, { text: '/status' }], [{ text: '/failed_deliveries' }, { text: '/retry_failed' }]], resize_keyboard: true, is_persistent: true } });
+      reply_markup: commandKeyboard });
     return reply('ok');
   }
   if (command === '/status') {
