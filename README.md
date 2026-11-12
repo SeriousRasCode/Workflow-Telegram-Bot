@@ -1,6 +1,20 @@
-# 🤖 GitHub Workflow Telegram Bot
+# 🤖 Workflow Telegram Bot
 
-A Telegram bot written in TypeScript and Node.js that delivers GitHub repository events (pushes, pull requests, issues, comments, releases, workflow runs, stars, forks) to Telegram groups, channels, or private chats with **Telegram Forum Topics** support.
+<div align="center">
+
+**Bring GitHub activity into the Telegram chats where your team already works.**
+
+Secure webhook notifications, forum-topic routing, and delivery recovery in one bot.
+
+![TypeScript](https://img.shields.io/badge/TypeScript-5.8-blue)
+![Node.js](https://img.shields.io/badge/Node.js-20%2B-339933)
+![Cloudflare Workers](https://img.shields.io/badge/Cloudflare-Workers-F38020)
+
+[Features](#features) · [Quick start](#quick-start) · [Commands](#bot-commands-reference) · [Cloudflare](#cloudflare-workers-deployment) · [Docker](#docker-deployment)
+
+</div>
+
+Workflow Telegram Bot is a TypeScript bot for sending GitHub repository activity to Telegram groups and channels. Route events into forum topics, tune notifications per chat or repository, and recover failed Telegram deliveries. Run it on Cloudflare Workers with D1 or as a Node.js service with Docker.
 
 ---
 
@@ -11,7 +25,7 @@ A Telegram bot written in TypeScript and Node.js that delivers GitHub repository
   - **Direct Command Assignment**: Run `/set_topic <event>` directly inside any topic &mdash; the bot automatically detects the topic ID!
   - **Interactive Inline Buttons**: Open `/settings` inside a topic to map events or toggle preferences with a single tap.
 - **🔒 Webhook Security**: Secure HMAC SHA-256 signature verification (`X-Hub-Signature-256`) against your configured GitHub webhook secret.
-- **📦 Multi-Repository Routing**: Route events from multiple repositories into specific chats/topics using `/subscribe <owner/repo>` or default wildcard matching (`*`).
+- **📦 Multi-Repository Routing**: Subscribe each chat to the repositories it wants and route their events to that chat's topics.
 - **🌿 Branch Filtering**: Restrict push and workflow notifications to specific branches (e.g., `/filter_branches main master release/*`).
 - **📝 Verbosity Modes**: Switch between `detailed` (lists individual commits with SHA, message, author) and `compact` (summary line + compare link).
 - **🔕 Silent Mode**: Deliver notifications silently without sound/vibration (`disable_notification`).
@@ -158,6 +172,7 @@ The allowlists control which repository events each chat may receive, including 
 | Command | Description | Permission |
 | :--- | :--- | :--- |
 | `/settings` | Opens the interactive settings dashboard with inline buttons | Admin |
+| `/link [chat-id]` | Link your private command keyboard to a group or channel | Admin |
 | `/status` | Displays connection details, active topics, and routing table | All |
 | `/set_topic <event>` | Routes an event type (`all`, `pushes`, `prs`, `issues`, etc.) to the current topic | Admin |
 | `/unset_topic <event>` | Removes topic routing for that event | Admin |
@@ -193,6 +208,8 @@ The Cloudflare version uses Telegram webhooks and a D1 database. Its settings ar
 3. Deploy with `npx wrangler deploy --secrets-file .secrets.json`. The secret file must contain `TELEGRAM_BOT_TOKEN` and a random `TELEGRAM_WEBHOOK_SECRET`; never commit it.
 4. Set the Telegram webhook to `<worker-url>/telegram`, passing `TELEGRAM_WEBHOOK_SECRET` as `secret_token`. Use the Telegram Bot API `setWebhook` method.
 5. In a group or channel, run `/status` to get its chat ID. In a private chat with the bot, run `/connect <chat-id> <owner/repo>` for one repository, or `/connect <chat-id> <organization>` for an entire organization. The bot returns a unique GitHub webhook URL and secret. Add the webhook to that repository or organization. Run `/subscribe <owner/repo>` in the group or channel, or `/subscribe <chat-id> <owner/repo>` in the private chat. The subscription saves immediately; notifications begin when signed GitHub deliveries arrive.
+
+Run `/link` in a group or channel to link your private command keyboard to it, or `/link <chat-id>` privately. The selected chat is saved in D1 for that Telegram user; another user can link their own group independently.
 
 The Cloudflare bot also supports `/disconnect <organization|owner/repo>`, `/toggle_event <event>`, `/verbosity <compact|detailed>`, and `/silent <on|off>`. In a private chat, prefix setting commands with the target chat ID. A repository administrator can configure a repository webhook, including for a personal repository. An organization owner can configure an organization webhook covering multiple repositories.
 
