@@ -2,6 +2,7 @@ export type EventType =
   | 'all'
   | 'pushes'
   | 'prs'
+  | 'reviews'
   | 'issues'
   | 'comments'
   | 'releases'
@@ -13,6 +14,7 @@ export interface ChatTopicSettings {
   all?: number | null;
   pushes?: number | null;
   prs?: number | null;
+  reviews?: number | null;
   issues?: number | null;
   comments?: number | null;
   releases?: number | null;
@@ -24,6 +26,7 @@ export interface ChatTopicSettings {
 export interface ChatEventsEnabled {
   pushes: boolean;
   prs: boolean;
+  reviews: boolean;
   issues: boolean;
   comments: boolean;
   releases: boolean;
