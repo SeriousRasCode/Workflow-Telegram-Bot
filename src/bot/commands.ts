@@ -8,8 +8,8 @@ import { eventNames, topicNames, setRepositoryBranches, setRepositoryEvent, setR
 import { retryFailedDeliveries } from '../github/notifier.js';
 
 const commandKeyboard = new Keyboard()
-  .text('/menu').text('/status').row()
-  .text('/failed_deliveries').text('/retry_failed')
+  .text('📋 Menu', { style: 'primary' }).text('📊 Status', { style: 'primary' }).row()
+  .text('🚨 Failed deliveries', { style: 'danger' }).text('🔁 Retry failed', { style: 'success' })
   .resized().persistent();
 import {
   buildSettingsText,
@@ -19,6 +19,18 @@ import {
 } from './menus.js';
 
 export function registerBotCommands(bot: Bot): void {
+  const keyboardActions: Record<string, string> = {
+    '📋 Menu': '/menu',
+    '📊 Status': '/status',
+    '🚨 Failed deliveries': '/failed_deliveries',
+    '🔁 Retry failed': '/retry_failed',
+  };
+  bot.use(async (ctx, next) => {
+    const text = ctx.message?.text;
+    if (text && keyboardActions[text] && ctx.message) ctx.message.text = keyboardActions[text];
+    await next();
+  });
+
   // /start command
   bot.command('start', async (ctx) => {
     const chat = store.getOrCreateChat(
