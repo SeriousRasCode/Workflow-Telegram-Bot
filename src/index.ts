@@ -24,6 +24,7 @@ async function bootstrap() {
     // Set Telegram Bot UI Command Menu
     try {
       await bot.api.setMyCommands([
+        { command: 'menu', description: 'Open the interactive bot menu' },
         { command: 'settings', description: 'Interactive settings & topic configuration' },
         { command: 'status', description: 'View current topic routing & bot status' },
         { command: 'set_topic', description: 'Assign current topic for an event (/set_topic <event>)' },
