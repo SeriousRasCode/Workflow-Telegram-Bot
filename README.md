@@ -26,6 +26,7 @@ A Telegram bot written in TypeScript and Node.js that delivers GitHub repository
 | :--- | :--- | :--- |
 | `pushes` | `push` | Commits list, short SHA, commit message, author, branch, compare link, force-push detection |
 | `prs` | `pull_request` | Opened, merged, closed, reopened, review requested, base/head branches, additions/deletions, description preview |
+| `reviews` | `pull_request_review` | Submitted approvals, change requests, and reviews with comment previews |
 | `issues` | `issues` | Opened, closed, reopened, assigned, labeled, title, author, labels, description preview |
 | `comments` | `issue_comment` | New comments on issues or pull requests with quote preview |
 | `releases` | `release` | Published releases, pre-releases, tag names, release notes snippet |
@@ -166,6 +167,7 @@ The allowlists control which repository events each chat may receive, including 
 | `/filter_branches <branches>` | Filter notifications to specific branches (e.g. `/filter_branches main develop`) | Admin |
 | `/filter_branches all` | Clears branch filter (notifies on all branches) | Admin |
 | `/workflow_alerts <all|failures>` | Choose all completed CI runs or failures with recovery alerts | Admin |
+| `/toggle_event reviews` | Toggle submitted pull request review notifications | Admin |
 | `/quiet_hours <start> <end> <timezone>` | Buffer routine notifications during local quiet hours; `/quiet_hours off` disables | Admin |
 | `/digest daily <time> <timezone>` | Send routine events in a daily digest; `/digest off` disables | Admin |
 | `/test` | Send a test notification and show connection readiness | Admin |
@@ -193,6 +195,8 @@ The Cloudflare version uses Telegram webhooks and a D1 database. Its settings ar
 The Cloudflare bot also supports `/disconnect <organization|owner/repo>`, `/toggle_event <event>`, `/verbosity <compact|detailed>`, and `/silent <on|off>`. In a private chat, prefix setting commands with the target chat ID. A repository administrator can configure a repository webhook, including for a personal repository. An organization owner can configure an organization webhook covering multiple repositories.
 
 Use `/workflow_alerts failures` to notify on failed and timed-out workflow runs, then send one recovery message when the same repository, workflow, and branch succeeds. `/workflow_alerts all` keeps notifications for all completed runs. Workflow notifications must also be enabled in `/menu` or with `/toggle_event workflows`. The Node bot supports the same alert modes through `/workflow_alerts` and `/settings`.
+
+PR review alerts are off by default. Enable them with `/toggle_event reviews` or the Events menu, and select **Pull request reviews** when configuring the GitHub webhook.
 
 Use `/quiet_hours 22:00 08:00 Africa/Nairobi` to hold routine notifications overnight, or `/digest daily 09:00 Africa/Nairobi` to collect them for a daily summary. The timezone must be an IANA name. CI failure and recovery alerts bypass the digest. Both deployments support `/quiet_hours off` and `/digest off`. Apply D1 migration `0004_digest.sql` before deploying this feature to Cloudflare.
 
