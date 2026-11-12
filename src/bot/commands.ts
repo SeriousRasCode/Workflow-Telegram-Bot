@@ -1,4 +1,4 @@
-import { Bot, Context, InlineKeyboard } from 'grammy';
+import { Bot, Context, InlineKeyboard, Keyboard } from 'grammy';
 import { store } from '../storage/store.js';
 import { config } from '../config.js';
 import { EventType } from '../types/store.js';
@@ -6,6 +6,11 @@ import { isChatAdmin, escapeHtml } from './utils.js';
 import { validTime, validTimeZone } from './digest.js';
 import { eventNames, topicNames, setRepositoryBranches, setRepositoryEvent, setRepositoryTopic, formatRepositoryRule } from './repository_rules.js';
 import { retryFailedDeliveries } from '../github/notifier.js';
+
+const commandKeyboard = new Keyboard()
+  .text('/menu').text('/status').row()
+  .text('/failed_deliveries').text('/retry_failed')
+  .resized().persistent();
 import {
   buildSettingsText,
   buildMainMenuKeyboard,
@@ -35,7 +40,7 @@ export function registerBotCommands(bot: Bot): void {
     welcome += `   • Secret: <code>${config.webhookSecret ? '(your configured secret)' : '(none configured)'}</code>\n\n`;
     welcome += `Type /help to see all available commands or /settings for interactive configuration.`;
 
-    await ctx.reply(welcome, { parse_mode: 'HTML', reply_markup: new InlineKeyboard().text('⚙️ Open menu', 'menu:main') });
+    await ctx.reply(welcome, { parse_mode: 'HTML', reply_markup: commandKeyboard });
   });
 
   // /help command
@@ -69,7 +74,7 @@ export function registerBotCommands(bot: Bot): void {
     help += `• <code>/repo_branches owner/repo main</code> &mdash; Override branches\n`;
     help += `• <code>/repo_topic owner/repo pushes here</code> &mdash; Override a topic\n`;
 
-    await ctx.reply(help, { parse_mode: 'HTML' });
+    await ctx.reply(help, { parse_mode: 'HTML', reply_markup: commandKeyboard });
   });
 
   // /settings command
