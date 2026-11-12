@@ -5,7 +5,7 @@ import type { ChatSettings } from '../src/types/store.js';
 
 const chat: ChatSettings = {
   chatId: -1004436503021, chatTitle: 'Engineering <Team>', subscribedRepos: ['seriousrascode/workflow-telegram-bot'],
-  topics: {}, topicNames: {}, eventsEnabled: { pushes: true, prs: true, issues: true, comments: false,
+  topics: {}, topicNames: {}, eventsEnabled: { pushes: true, prs: true, reviews: false, issues: true, comments: false,
     releases: true, workflows: false, stars: true, forks: true }, branchFilter: [], verbosity: 'detailed', silent: false,
   createdAt: '', updatedAt: '',
 };
