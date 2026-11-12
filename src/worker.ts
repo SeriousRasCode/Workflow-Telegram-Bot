@@ -281,9 +281,8 @@ async function handleTelegram(request: Request, env: Env): Promise<Response> {
   }
   if (command === '/start' || command === '/help') {
     const text = '<b>GitHub notifications setup</b>\n\n1. Add me to your group or channel.\n2. Send <code>/link</code> there, or send <code>/link CHAT_ID</code> privately, to link your command keyboard.\n3. Message me privately: <code>/connect CHAT_ID owner/repo</code> for one repository, or <code>/connect CHAT_ID organization</code> for an entire organization.\n4. Add the GitHub webhook using the URL and secret I send you.\n5. Subscribe with <code>/subscribe owner/repo</code>.\n\nUse <code>/test</code> to check Telegram delivery and <code>/delivery_status</code> for recent GitHub outcomes. Open the menu below or use /menu.';
-    const showKeyboard = !isPrivate || targetId !== chat.id;
     await telegram(env, 'sendMessage', { chat_id: chat.id, text, parse_mode: 'HTML', ...(thread ? { message_thread_id: thread } : {}),
-      ...(showKeyboard ? { reply_markup: commandKeyboard } : {}) });
+      reply_markup: isPrivate && targetId === chat.id ? { remove_keyboard: true } : commandKeyboard });
     return reply('ok');
   }
   if (command === '/status') {
