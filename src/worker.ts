@@ -95,6 +95,10 @@ async function handleMenuCallback(env: Env, update: TgUpdate): Promise<Response>
   }
   const target: TgChat = targetId === message.chat.id ? message.chat : { id: targetId, type: 'supergroup' };
   if (!(await admin(env, target, query.from.id))) { await answer('Only chat administrators can manage this bot.', true); return reply('ok'); }
+  if (message.chat.type === 'private') {
+    await env.DB.prepare('INSERT INTO user_chat_contexts(user_id,chat_id,updated_at) VALUES(?,?,?) ON CONFLICT(user_id) DO UPDATE SET chat_id=excluded.chat_id,updated_at=excluded.updated_at')
+      .bind(String(query.from.id), String(targetId), Date.now()).run();
+  }
   const settings = await getSettings(env, target);
   let view: MenuView = 'home';
   let threadId = message.message_thread_id;
@@ -217,13 +221,18 @@ async function handleTelegram(request: Request, env: Env): Promise<Response> {
   const chat = msg.chat;
   const thread = msg.message_thread_id;
   const isPrivate = chat.type === 'private';
-  const targetId = isPrivate && /^-?\d+$/.test(parts[0] || '') ? Number(parts.shift()) : chat.id;
+  const explicitTargetId = isPrivate && /^-?\d+$/.test(parts[0] || '') ? Number(parts.shift()) : undefined;
+  const linked = isPrivate && userId !== undefined
+    ? await env.DB.prepare('SELECT chat_id FROM user_chat_contexts WHERE user_id=?').bind(String(userId)).first<{ chat_id: string }>()
+    : null;
+  const targetId = explicitTargetId ?? (linked ? Number(linked.chat_id) : chat.id);
   const target: TgChat = targetId === chat.id ? chat : { id: targetId, type: 'supergroup' };
   const respond = (text: string, html = false) => send(env, chat.id, text, thread, html);
 
   if (command === '/start' || command === '/help') {
     await telegram(env, 'setMyCommands', { commands: [
       { command: 'menu', description: 'Open the interactive bot menu' },
+      { command: 'link', description: 'Link this group to your private keyboard' },
       { command: 'status', description: 'View connection and subscription status' },
       { command: 'subscribe', description: 'Follow a repository' },
       { command: 'unsubscribe', description: 'Unfollow a repository' },
@@ -241,8 +250,12 @@ async function handleTelegram(request: Request, env: Env): Promise<Response> {
   if (command === '/menu' || command === '/settings') {
     const channelCommand = isChannelPost(update);
     if (!userId && !channelCommand) return reply('ok');
-    if (isPrivate && targetId === chat.id) { await respond('Send <code>/menu CHAT_ID</code> to manage a group or channel. Get its ID with <code>/status</code> there.', true); return reply('ok'); }
+    if (isPrivate && targetId === chat.id) { await respond('Run <code>/link</code> in the group or channel first, then use this private menu. You can also send <code>/menu CHAT_ID</code>.', true); return reply('ok'); }
     if (!channelCommand && !(await admin(env, target, userId!))) { await respond('Only chat administrators can open this menu.'); return reply('ok'); }
+    if (isPrivate && userId) {
+      await env.DB.prepare('INSERT INTO user_chat_contexts(user_id,chat_id,updated_at) VALUES(?,?,?) ON CONFLICT(user_id) DO UPDATE SET chat_id=excluded.chat_id,updated_at=excluded.updated_at')
+        .bind(String(userId), String(targetId), Date.now()).run();
+    }
     const menu = await menuFor(env, target, 'home', thread);
     await telegram(env, 'sendMessage', { chat_id: chat.id, text: menu.text, parse_mode: 'HTML', reply_markup: menu.reply_markup,
       ...(thread ? { message_thread_id: thread } : {}), link_preview_options: { is_disabled: true } });
@@ -251,21 +264,52 @@ async function handleTelegram(request: Request, env: Env): Promise<Response> {
 
   if (command === '/start' && isPrivate && /^connect_-?\d+$/.test(parts[0] || '')) {
     const linkedChatId = parts[0].slice('connect_'.length);
-    await telegram(env, 'sendMessage', { chat_id: chat.id, text: `<b>Connect chat ${escape(linkedChatId)}</b>\n\nChoose what to follow:\n• One repository: <code>/connect ${escape(linkedChatId)} owner/repo</code>\n• An organization: <code>/connect ${escape(linkedChatId)} organization</code>\n\nI’ll send the GitHub webhook URL and secret here, privately.`, parse_mode: 'HTML', reply_markup: { inline_keyboard: [[{ text: '⚙️ Open chat menu', callback_data: `m:${linkedChatId}:home` }]] } });
+    const linkedChat = await telegram(env, 'getChat', { chat_id: linkedChatId }) as TgChat;
+    if (!userId || !(await admin(env, linkedChat, userId))) {
+      await respond('Only an administrator of that group or channel can link it to this private keyboard.');
+      return reply('ok');
+    }
+    await env.DB.prepare('INSERT INTO user_chat_contexts(user_id,chat_id,updated_at) VALUES(?,?,?) ON CONFLICT(user_id) DO UPDATE SET chat_id=excluded.chat_id,updated_at=excluded.updated_at')
+      .bind(String(userId), linkedChatId, Date.now()).run();
+    const linkedSettings = await getSettings(env, linkedChat);
+    linkedSettings.chatTitle = linkedChat.title || linkedSettings.chatTitle;
+    linkedSettings.isForum = Boolean(linkedChat.is_forum);
+    await saveSettings(env, linkedSettings);
+    await telegram(env, 'sendMessage', { chat_id: chat.id, text: `<b>Linked keyboard to ${escape(linkedChat.title || linkedChatId)}</b>\n\nThe persistent buttons now manage this group or channel. You can switch the linked chat by opening another private setup link.`, parse_mode: 'HTML', reply_markup: commandKeyboard });
+    await telegram(env, 'sendMessage', { chat_id: chat.id, text: 'Open the linked chat menu:', reply_markup: { inline_keyboard: [[{ text: '⚙️ Open chat menu', callback_data: `m:${linkedChatId}:home` }]] } });
     return reply('ok');
   }
   if (command === '/start' || command === '/help') {
-    const text = '<b>GitHub notifications setup</b>\n\n1. Add me to your group or channel.\n2. Send <code>/status</code> there to get its chat ID.\n3. Message me privately: <code>/connect CHAT_ID owner/repo</code> for one repository, or <code>/connect CHAT_ID organization</code> for an entire organization.\n4. Add the GitHub webhook using the URL and secret I send you.\n5. Subscribe with <code>/subscribe owner/repo</code>.\n\nUse <code>/test</code> to check Telegram delivery and <code>/delivery_status</code> for recent GitHub outcomes. Open the menu below or use /menu.';
+    const text = '<b>GitHub notifications setup</b>\n\n1. Add me to your group or channel.\n2. Send <code>/link</code> there, or send <code>/link CHAT_ID</code> privately, to link your command keyboard.\n3. Message me privately: <code>/connect CHAT_ID owner/repo</code> for one repository, or <code>/connect CHAT_ID organization</code> for an entire organization.\n4. Add the GitHub webhook using the URL and secret I send you.\n5. Subscribe with <code>/subscribe owner/repo</code>.\n\nUse <code>/test</code> to check Telegram delivery and <code>/delivery_status</code> for recent GitHub outcomes. Open the menu below or use /menu.';
+    const showKeyboard = !isPrivate || targetId !== chat.id;
     await telegram(env, 'sendMessage', { chat_id: chat.id, text, parse_mode: 'HTML', ...(thread ? { message_thread_id: thread } : {}),
-      reply_markup: commandKeyboard });
+      ...(showKeyboard ? { reply_markup: commandKeyboard } : {}) });
     return reply('ok');
   }
   if (command === '/status') {
-    const settings = await getSettings(env, chat);
-    const owners = await env.DB.prepare('SELECT owner,verified FROM connections WHERE chat_id=?').bind(String(chat.id)).all<{ owner: string; verified: number }>();
+    if (isPrivate && targetId === chat.id) {
+      await respond('Run <code>/link</code> in the group or channel first so I can show its status.', true);
+      return reply('ok');
+    }
+    if (isPrivate && userId) {
+      if (!(await admin(env, target, userId))) { await respond('Only chat administrators can view this chat status.'); return reply('ok'); }
+      await env.DB.prepare('INSERT INTO user_chat_contexts(user_id,chat_id,updated_at) VALUES(?,?,?) ON CONFLICT(user_id) DO UPDATE SET chat_id=excluded.chat_id,updated_at=excluded.updated_at')
+        .bind(String(userId), String(targetId), Date.now()).run();
+    }
+    const settings = await getSettings(env, target);
+    const owners = await env.DB.prepare('SELECT owner,verified FROM connections WHERE chat_id=?').bind(String(targetId)).all<{ owner: string; verified: number }>();
     const connections = owners.results.map((x: { owner: string; verified: number }) => `• ${escape(x.owner)} ${x.verified ? '✅ webhook confirmed' : '⏳ webhook not confirmed'}`).join('\n') || 'None yet';
     const repos = settings.subscribedRepos.map(x => `• ${escape(x)}`).join('\n') || 'None yet';
-    await respond(`<b>${command === '/status' ? 'Connection status' : 'Settings'}</b>\n\n<b>Chat ID:</b> <code>${chat.id}</code>\n\n<b>Connections</b>\n${connections}\n\n<b>Subscribed repositories</b>\n${repos}\n\n<b>Next step:</b> ${owners.results.length ? 'Use <code>/subscribe owner/repo</code> to follow a repository. If the webhook is unconfirmed, check GitHub’s Recent Deliveries.' : `Message me privately: <code>/connect ${chat.id} owner/repo</code> (one repo) or <code>/connect ${chat.id} organization</code> (all repos in an organization).`}`, true);
+    await respond(`<b>Connection status</b>\n\n<b>Chat ID:</b> <code>${targetId}</code>\n\n<b>Connections</b>\n${connections}\n\n<b>Subscribed repositories</b>\n${repos}\n\n<b>Next step:</b> ${owners.results.length ? 'Use <code>/subscribe owner/repo</code> to follow a repository. If the webhook is unconfirmed, check GitHub’s Recent Deliveries.' : `Message me privately: <code>/connect ${targetId} owner/repo</code> (one repo) or <code>/connect ${targetId} organization</code> (all repos in an organization).`}`, true);
+    return reply('ok');
+  }
+  if (command === '/link') {
+    if (isPrivate && targetId === chat.id) {
+      await respond('Run /link in the group or channel you want your private keyboard to manage.');
+      return reply('ok');
+    }
+    const self = await telegram(env, 'getMe', {});
+    await respond(`Open this private link to link your keyboard to <b>${escape(target.title || String(targetId))}</b>:\n<a href="https://t.me/${escape(self.username)}?start=connect_${targetId}">Link this chat</a>`, true);
     return reply('ok');
   }
   const channelCommand = isChannelPost(update);
