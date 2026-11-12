@@ -94,7 +94,7 @@ export function registerBotCommands(bot: Bot): void {
 
     const linked = ctx.from ? store.getLinkedChat(ctx.from.id) : undefined;
     if (ctx.chat.type === 'private' && !linked) welcome += `\n\nUse <code>/link CHAT_ID</code> here, or <code>/link</code> in a group, to connect these buttons to that chat.`;
-    await ctx.reply(welcome, { parse_mode: 'HTML', ...(ctx.chat.type !== 'private' || linked ? { reply_markup: commandKeyboard } : {}) });
+    await ctx.reply(welcome, { parse_mode: 'HTML', reply_markup: ctx.chat.type === 'private' && !linked ? { remove_keyboard: true } : commandKeyboard });
   });
 
   // /help command
@@ -130,7 +130,7 @@ export function registerBotCommands(bot: Bot): void {
     help += `• <code>/repo_topic owner/repo pushes here</code> &mdash; Override a topic\n`;
 
     const linked = ctx.from ? store.getLinkedChat(ctx.from.id) : undefined;
-    await ctx.reply(help, { parse_mode: 'HTML', ...(ctx.chat.type !== 'private' || linked ? { reply_markup: commandKeyboard } : {}) });
+    await ctx.reply(help, { parse_mode: 'HTML', reply_markup: ctx.chat.type === 'private' && !linked ? { remove_keyboard: true } : commandKeyboard });
   });
 
   bot.command('link', async (ctx) => {
