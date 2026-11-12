@@ -196,6 +196,21 @@ async function handleTelegram(request: Request, env: Env): Promise<Response> {
   const target: TgChat = targetId === chat.id ? chat : { id: targetId, type: 'supergroup' };
   const respond = (text: string, html = false) => send(env, chat.id, text, thread, html);
 
+  if (command === '/start' || command === '/help') {
+    await telegram(env, 'setMyCommands', { commands: [
+      { command: 'menu', description: 'Open the interactive bot menu' },
+      { command: 'status', description: 'View connection and subscription status' },
+      { command: 'subscribe', description: 'Follow a repository' },
+      { command: 'unsubscribe', description: 'Unfollow a repository' },
+      { command: 'repos', description: 'List followed repositories' },
+      { command: 'test', description: 'Send a test notification' },
+      { command: 'delivery_status', description: 'Show recent delivery outcomes' },
+      { command: 'quiet_hours', description: 'Configure quiet hours' },
+      { command: 'digest', description: 'Configure a daily digest' },
+      { command: 'help', description: 'Show setup instructions' },
+    ] });
+  }
+
   if (command === '/menu' || command === '/settings') {
     const channelCommand = isChannelPost(update);
     if (!userId && !channelCommand) return reply('ok');
@@ -209,11 +224,13 @@ async function handleTelegram(request: Request, env: Env): Promise<Response> {
 
   if (command === '/start' && isPrivate && /^connect_-?\d+$/.test(parts[0] || '')) {
     const linkedChatId = parts[0].slice('connect_'.length);
-    await respond(`<b>Connect chat ${escape(linkedChatId)}</b>\n\nChoose what to follow:\n• One repository: <code>/connect ${escape(linkedChatId)} owner/repo</code>\n• An organization: <code>/connect ${escape(linkedChatId)} organization</code>\n\nI’ll send the GitHub webhook URL and secret here, privately.`, true);
+    await telegram(env, 'sendMessage', { chat_id: chat.id, text: `<b>Connect chat ${escape(linkedChatId)}</b>\n\nChoose what to follow:\n• One repository: <code>/connect ${escape(linkedChatId)} owner/repo</code>\n• An organization: <code>/connect ${escape(linkedChatId)} organization</code>\n\nI’ll send the GitHub webhook URL and secret here, privately.`, parse_mode: 'HTML', reply_markup: { inline_keyboard: [[{ text: '⚙️ Open chat menu', callback_data: `m:${linkedChatId}:home` }]] } });
     return reply('ok');
   }
   if (command === '/start' || command === '/help') {
-    await respond('<b>GitHub notifications setup</b>\n\n1. Add me to your group or channel.\n2. Send <code>/status</code> there to get its chat ID.\n3. Message me privately: <code>/connect CHAT_ID owner/repo</code> for one repository, or <code>/connect CHAT_ID organization</code> for an entire organization.\n4. Add the GitHub webhook using the URL and secret I send you.\n5. Subscribe with <code>/subscribe owner/repo</code>.\n\nUse <code>/test</code> to check Telegram delivery and <code>/delivery_status</code> for recent GitHub outcomes. Send <code>/menu</code> to manage notifications with buttons.', true);
+    const text = '<b>GitHub notifications setup</b>\n\n1. Add me to your group or channel.\n2. Send <code>/status</code> there to get its chat ID.\n3. Message me privately: <code>/connect CHAT_ID owner/repo</code> for one repository, or <code>/connect CHAT_ID organization</code> for an entire organization.\n4. Add the GitHub webhook using the URL and secret I send you.\n5. Subscribe with <code>/subscribe owner/repo</code>.\n\nUse <code>/test</code> to check Telegram delivery and <code>/delivery_status</code> for recent GitHub outcomes. Open the menu below or use /menu.';
+    await telegram(env, 'sendMessage', { chat_id: chat.id, text, parse_mode: 'HTML', ...(thread ? { message_thread_id: thread } : {}),
+      reply_markup: { inline_keyboard: [[{ text: '⚙️ Open menu', callback_data: `m:${chat.id}:home` }]] } });
     return reply('ok');
   }
   if (command === '/status') {
