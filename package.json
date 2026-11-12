@@ -1,7 +1,7 @@
 {
   "name": "workflow-telegram-bot",
   "version": "1.0.0",
-  "description": "Telegram Bot for GitHub Webhooks with Forum Topics and Interactive Settings",
+  "description": "GitHub webhook notifications for Telegram with forum-topic routing, filters, digests, and delivery recovery",
   "main": "dist/index.js",
   "scripts": {
     "dev": "tsx watch src/index.ts",
@@ -13,10 +13,14 @@
   "keywords": [
     "telegram",
     "bot",
+    "telegram-bot",
     "github",
     "webhook",
+    "github-webhooks",
+    "notifications",
+    "cloudflare-workers",
     "forum-topics",
-    "notifications"
+    "docker"
   ],
   "author": "",
   "license": "MIT",
