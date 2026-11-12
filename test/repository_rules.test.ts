@@ -5,7 +5,7 @@ import { effectiveSettings, setRepositoryBranches, setRepositoryEvent, setReposi
 
 const chat = (): ChatSettings => ({
   chatId: 1, chatTitle: 'Team', subscribedRepos: ['acme/api'], topics: { all: 10, pushes: 20 }, topicNames: {},
-  eventsEnabled: { pushes: true, prs: true, issues: true, comments: false, releases: true, workflows: false, stars: true, forks: true },
+  eventsEnabled: { pushes: true, prs: true, reviews: false, issues: true, comments: false, releases: true, workflows: false, stars: true, forks: true },
   branchFilter: ['main'], verbosity: 'detailed', silent: false, createdAt: '', updatedAt: '',
 });
 
