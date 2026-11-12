@@ -5,7 +5,7 @@ import { digestDue, digestItem, digestMessages, isQuiet, shouldQueueDigest, vali
 
 const chat = (): ChatSettings => ({
   chatId: 1, chatTitle: 'Team', subscribedRepos: [], topics: {}, topicNames: {},
-  eventsEnabled: { pushes: true, prs: true, issues: true, comments: false, releases: true, workflows: false, stars: true, forks: true },
+  eventsEnabled: { pushes: true, prs: true, reviews: false, issues: true, comments: false, releases: true, workflows: false, stars: true, forks: true },
   branchFilter: [], verbosity: 'detailed', silent: false, createdAt: '', updatedAt: '',
 });
 
