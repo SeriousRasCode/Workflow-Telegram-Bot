@@ -39,6 +39,7 @@ export class SettingsStore {
         this.data.digestItems ||= {};
         this.data.deliveryStatus ||= {};
         this.data.failedDeliveries ||= {};
+        this.data.userChatContexts ||= {};
         // Earlier versions subscribed every chat to every repository implicitly.
         for (const chat of Object.values(this.data.chats)) {
           chat.subscribedRepos = (chat.subscribedRepos || []).filter((repo) => repo !== '*');
@@ -106,6 +107,15 @@ export class SettingsStore {
 
   public getAllChats(): ChatSettings[] {
     return Object.values(this.data.chats);
+  }
+
+  public linkUserToChat(userId: number, chatId: number): void {
+    (this.data.userChatContexts ||= {})[String(userId)] = chatId;
+    this.save();
+  }
+
+  public getLinkedChat(userId: number): number | undefined {
+    return this.data.userChatContexts?.[String(userId)];
   }
 
   public queueDigest(chatId: number, item: string): void {

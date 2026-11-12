@@ -7,6 +7,24 @@ import { validTime, validTimeZone } from './digest.js';
 import { eventNames, topicNames, setRepositoryBranches, setRepositoryEvent, setRepositoryTopic, formatRepositoryRule } from './repository_rules.js';
 import { retryFailedDeliveries } from '../github/notifier.js';
 
+function targetChatId(ctx: Context): number {
+  if (ctx.chat?.type !== 'private') return ctx.chat!.id;
+  const explicit = ctx.message?.text?.trim().split(/\s+/)[1];
+  if (explicit && /^-?\d+$/.test(explicit)) return Number(explicit);
+  return ctx.from ? store.getLinkedChat(ctx.from.id) || ctx.chat.id : ctx.chat.id;
+}
+
+async function isChatAdminFor(ctx: Context, chatId: number): Promise<boolean> {
+  if (chatId === ctx.chat?.id) return isChatAdmin(ctx);
+  if (!ctx.from) return false;
+  try {
+    const member = await ctx.api.getChatMember(chatId, ctx.from.id);
+    return member.status === 'creator' || member.status === 'administrator';
+  } catch {
+    return false;
+  }
+}
+
 const commandKeyboard = new Keyboard()
   .text('📋 Menu', { style: 'primary' }).text('📊 Status', { style: 'primary' }).row()
   .text('🚨 Failed deliveries', { style: 'danger' }).text('🔁 Retry failed', { style: 'success' })
@@ -33,6 +51,28 @@ export function registerBotCommands(bot: Bot): void {
 
   // /start command
   bot.command('start', async (ctx) => {
+    const startPayload = ctx.message?.text?.split(/\s+/)[1] || '';
+    const linkMatch = ctx.chat.type === 'private' ? startPayload.match(/^connect_(-?\d+)$/) : null;
+    if (linkMatch && ctx.from) {
+      const targetId = Number(linkMatch[1]);
+      try {
+        const member = await ctx.api.getChatMember(targetId, ctx.from.id);
+        if (member.status !== 'creator' && member.status !== 'administrator') {
+          await ctx.reply('Only an administrator of that group or channel can link it to this private keyboard.');
+          return;
+        }
+        const target = await ctx.api.getChat(targetId);
+        const title = 'title' in target ? target.title : 'Linked chat';
+        store.getOrCreateChat(targetId, title, 'is_forum' in target ? Boolean(target.is_forum) : false);
+        store.linkUserToChat(ctx.from.id, targetId);
+        await ctx.reply(`Linked keyboard to <b>${escapeHtml(title)}</b>. Its buttons now manage this chat.`, {
+          parse_mode: 'HTML', reply_markup: commandKeyboard,
+        });
+      } catch {
+        await ctx.reply('I could not verify your admin access to that group or channel. Make sure I am still a member, then try the link again.');
+      }
+      return;
+    }
     const chat = store.getOrCreateChat(
       ctx.chat.id,
       ctx.chat.title || ctx.from?.first_name || 'Direct Chat',
@@ -52,7 +92,9 @@ export function registerBotCommands(bot: Bot): void {
     welcome += `   • Secret: <code>${config.webhookSecret ? '(your configured secret)' : '(none configured)'}</code>\n\n`;
     welcome += `Type /help to see all available commands or /settings for interactive configuration.`;
 
-    await ctx.reply(welcome, { parse_mode: 'HTML', reply_markup: commandKeyboard });
+    const linked = ctx.from ? store.getLinkedChat(ctx.from.id) : undefined;
+    if (ctx.chat.type === 'private' && !linked) welcome += `\n\nUse <code>/link CHAT_ID</code> here, or <code>/link</code> in a group, to connect these buttons to that chat.`;
+    await ctx.reply(welcome, { parse_mode: 'HTML', ...(ctx.chat.type !== 'private' || linked ? { reply_markup: commandKeyboard } : {}) });
   });
 
   // /help command
@@ -66,6 +108,7 @@ export function registerBotCommands(bot: Bot): void {
 
     help += `<b>Settings & Interactive Menu:</b>\n`;
     help += `• <code>/settings</code> &mdash; Open interactive settings dashboard\n`;
+    help += `• <code>/link</code> &mdash; Link this group or channel to your private keyboard\n`;
     help += `• <code>/status</code> &mdash; View current connection & topic routing\n\n`;
 
     help += `<b>Repository & Filter Management:</b>\n`;
@@ -86,20 +129,60 @@ export function registerBotCommands(bot: Bot): void {
     help += `• <code>/repo_branches owner/repo main</code> &mdash; Override branches\n`;
     help += `• <code>/repo_topic owner/repo pushes here</code> &mdash; Override a topic\n`;
 
-    await ctx.reply(help, { parse_mode: 'HTML', reply_markup: commandKeyboard });
+    const linked = ctx.from ? store.getLinkedChat(ctx.from.id) : undefined;
+    await ctx.reply(help, { parse_mode: 'HTML', ...(ctx.chat.type !== 'private' || linked ? { reply_markup: commandKeyboard } : {}) });
+  });
+
+  bot.command('link', async (ctx) => {
+    if (ctx.chat.type === 'private') {
+      const requestedId = ctx.message?.text?.trim().split(/\s+/)[1];
+      if (!requestedId || !/^-?\d+$/.test(requestedId)) {
+        await ctx.reply('Use /link in your group or send /link CHAT_ID here to link a group or channel.');
+        return;
+      }
+      const targetId = Number(requestedId);
+      if (!ctx.from) { await ctx.reply('I could not identify your Telegram account.'); return; }
+      try {
+        const member = await ctx.api.getChatMember(targetId, ctx.from.id);
+        if (member.status !== 'creator' && member.status !== 'administrator') {
+          await ctx.reply('Only an administrator of that group or channel can link it to this private keyboard.');
+          return;
+        }
+        const target = await ctx.api.getChat(targetId);
+        const title = 'title' in target ? target.title : 'Linked chat';
+        store.getOrCreateChat(targetId, title, 'is_forum' in target ? Boolean(target.is_forum) : false);
+        store.linkUserToChat(ctx.from.id, targetId);
+        await ctx.reply(`Linked keyboard to <b>${escapeHtml(title)}</b>. Its buttons now manage this chat.`, {
+          parse_mode: 'HTML', reply_markup: commandKeyboard,
+        });
+      } catch {
+        await ctx.reply('I could not verify your admin access. Check the chat ID and make sure I am still in that chat.');
+      }
+      return;
+    }
+    if (!(await isChatAdmin(ctx))) { await ctx.reply('Only chat administrators can link this chat.'); return; }
+    const me = await ctx.api.getMe();
+    await ctx.reply(`Open this private link to connect your keyboard to <b>${escapeHtml(ctx.chat.title || 'this chat')}</b>:\nhttps://t.me/${me.username}?start=connect_${ctx.chat.id}`, { parse_mode: 'HTML' });
   });
 
   // /settings command
   bot.command(['menu', 'settings', 'config'], async (ctx) => {
+    const targetId = targetChatId(ctx);
+    if (ctx.chat.type === 'private' && targetId === ctx.chat.id) {
+      await ctx.reply('Open /link from your group or channel first so I know which chat these buttons should manage.');
+      return;
+    }
+    if (!(await isChatAdminFor(ctx, targetId))) { await ctx.reply('Only chat administrators can open this menu.'); return; }
+    if (ctx.chat.type === 'private' && ctx.from) store.linkUserToChat(ctx.from.id, targetId);
     const chat = store.getOrCreateChat(
-      ctx.chat.id,
-      ctx.chat.title || ctx.from?.first_name || 'Direct Chat',
-      Boolean(ctx.chat.is_forum)
+      targetId,
+      ctx.chat.id === targetId ? ctx.chat.title || ctx.from?.first_name || 'Direct Chat' : undefined,
+      ctx.chat.id === targetId ? Boolean(ctx.chat.is_forum) : false
     );
 
     const threadId = ctx.message?.message_thread_id;
     const text = buildSettingsText(chat);
-    const keyboard = buildMainMenuKeyboard(chat, threadId);
+    const keyboard = buildMainMenuKeyboard(chat, threadId, targetId);
 
     await ctx.reply(text, {
       parse_mode: 'HTML',
@@ -110,15 +193,24 @@ export function registerBotCommands(bot: Bot): void {
 
   // /status command
   bot.command('status', async (ctx) => {
+    const targetId = targetChatId(ctx);
+    if (ctx.chat.type === 'private' && targetId === ctx.chat.id) {
+      await ctx.reply('Open /link from your group or channel first so I can show its status.');
+      return;
+    }
+    if (ctx.chat.type === 'private') {
+      if (!(await isChatAdminFor(ctx, targetId))) { await ctx.reply('Only chat administrators can view this chat status.'); return; }
+      if (ctx.from) store.linkUserToChat(ctx.from.id, targetId);
+    }
     const chat = store.getOrCreateChat(
-      ctx.chat.id,
-      ctx.chat.title || ctx.from?.first_name || 'Direct Chat',
-      Boolean(ctx.chat.is_forum)
+      targetId,
+      ctx.chat.id === targetId ? ctx.chat.title || ctx.from?.first_name || 'Direct Chat' : undefined,
+      ctx.chat.id === targetId ? Boolean(ctx.chat.is_forum) : false
     );
 
     let text = `📊 <b>Bot Status & Routing</b>\n\n`;
-    text += `<b>Chat ID:</b> <code>${chat.chatId}</code>\n`;
-    text += `<b>Forum Topics Enabled:</b> ${ctx.chat.is_forum ? 'Yes' : 'No'}\n`;
+    text += `<b>Chat ID:</b> <code>${targetId}</code>\n`;
+    text += `<b>Forum Topics Enabled:</b> ${chat.isForum ? 'Yes' : 'No'}\n`;
     text += `<b>Webhook URL:</b> <code>${escapeHtml(config.baseUrl)}/webhook</code>\n`;
     text += `<b>Signature Verification:</b> ${config.webhookSecret ? '🔒 Enabled' : '⚠️ Disabled (No Secret)'}\n\n`;
     text += buildSettingsText(chat);
@@ -146,14 +238,18 @@ export function registerBotCommands(bot: Bot): void {
   });
 
   bot.command('failed_deliveries', async (ctx) => {
-    const failed = store.getFailedDeliveries(ctx.chat.id).slice(0, 5);
+    const chatId = targetChatId(ctx);
+    if (ctx.chat.type === 'private' && chatId === ctx.chat.id) { await ctx.reply('Open /link from your group or channel first to view its failed deliveries.'); return; }
+    const failed = store.getFailedDeliveries(chatId).slice(0, 5);
     const lines = failed.map(item => `• <code>${escapeHtml(item.repo)}</code> ${escapeHtml(item.eventType)} · ${item.attempts} attempts`);
     await ctx.reply(`<b>Failed deliveries</b>\n\n${lines.join('\n') || 'No failed messages.'}\n\n${failed.length ? 'Use /retry_failed to retry them.' : ''}`, { parse_mode: 'HTML' });
   });
 
   bot.command('retry_failed', async (ctx) => {
-    if (!(await isChatAdmin(ctx))) { await ctx.reply('Only chat administrators can retry failed deliveries.'); return; }
-    const result = await retryFailedDeliveries(ctx.chat.id);
+    const chatId = targetChatId(ctx);
+    if (ctx.chat.type === 'private' && chatId === ctx.chat.id) { await ctx.reply('Open /link from your group or channel first to retry its failed deliveries.'); return; }
+    if (!(await isChatAdminFor(ctx, chatId))) { await ctx.reply('Only chat administrators can retry failed deliveries.'); return; }
+    const result = await retryFailedDeliveries(chatId);
     await ctx.reply(`Retried ${result.retried} failed message(s); ${result.succeeded} delivered successfully.`);
   });
 
@@ -477,15 +573,26 @@ export function registerBotCommands(bot: Bot): void {
 
   // Handle Inline Keyboard Callback Queries
   bot.on('callback_query:data', async (ctx) => {
-    const data = ctx.callbackQuery.data;
-    const chatId = ctx.chat?.id;
+    let data = ctx.callbackQuery.data;
+    let chatId = ctx.chat?.id;
+
+    if (data.startsWith('target:')) {
+      const parts = data.split(':');
+      const encodedChatId = Number(parts[1]);
+      if (!Number.isSafeInteger(encodedChatId)) {
+        await ctx.answerCallbackQuery({ text: 'Invalid chat context.', show_alert: true });
+        return;
+      }
+      chatId = encodedChatId;
+      data = parts.slice(2).join(':');
+    }
 
     if (!chatId) {
       await ctx.answerCallbackQuery({ text: 'Error: Chat not found.' });
       return;
     }
 
-    if (!(await isChatAdmin(ctx))) {
+    if (!(await isChatAdminFor(ctx, chatId))) {
       await ctx.answerCallbackQuery({
         text: '⛔ Only chat administrators can change settings.',
         show_alert: true,
@@ -498,13 +605,13 @@ export function registerBotCommands(bot: Bot): void {
     if (data === 'menu:main') {
       await ctx.editMessageText(buildSettingsText(chat), {
         parse_mode: 'HTML',
-        reply_markup: buildMainMenuKeyboard(chat),
+        reply_markup: buildMainMenuKeyboard(chat, undefined, chatId),
       });
       await ctx.answerCallbackQuery();
     } else if (data === 'menu:events') {
       await ctx.editMessageText('🔔 <b>Select which GitHub events to notify:</b>', {
         parse_mode: 'HTML',
-        reply_markup: buildEventsMenuKeyboard(chat),
+        reply_markup: buildEventsMenuKeyboard(chat, chatId),
       });
       await ctx.answerCallbackQuery();
     } else if (data.startsWith('toggle_event:')) {
@@ -513,7 +620,7 @@ export function registerBotCommands(bot: Bot): void {
         store.toggleEvent(chatId, eventKey);
         // Refresh events menu
         await ctx.editMessageReplyMarkup({
-          reply_markup: buildEventsMenuKeyboard(store.getOrCreateChat(chatId)),
+          reply_markup: buildEventsMenuKeyboard(store.getOrCreateChat(chatId), chatId),
         });
         await ctx.answerCallbackQuery({ text: `Toggled ${eventKey}` });
       }
@@ -523,7 +630,7 @@ export function registerBotCommands(bot: Bot): void {
         `🎯 <b>Assign Topic #${threadId}</b>\n\nChoose which events should be posted to this topic:`,
         {
           parse_mode: 'HTML',
-          reply_markup: buildAssignTopicKeyboard(threadId),
+          reply_markup: buildAssignTopicKeyboard(threadId, chatId),
         }
       );
       await ctx.answerCallbackQuery();
@@ -538,7 +645,7 @@ export function registerBotCommands(bot: Bot): void {
           buildSettingsText(store.getOrCreateChat(chatId)),
         {
           parse_mode: 'HTML',
-          reply_markup: buildMainMenuKeyboard(store.getOrCreateChat(chatId), threadId),
+          reply_markup: buildMainMenuKeyboard(store.getOrCreateChat(chatId), threadId, chatId),
         }
       );
       await ctx.answerCallbackQuery({ text: `Assigned #${threadId} to ${eventType}` });
@@ -546,7 +653,7 @@ export function registerBotCommands(bot: Bot): void {
       const isSilent = store.toggleSilent(chatId);
       await ctx.editMessageText(buildSettingsText(store.getOrCreateChat(chatId)), {
         parse_mode: 'HTML',
-        reply_markup: buildMainMenuKeyboard(store.getOrCreateChat(chatId)),
+        reply_markup: buildMainMenuKeyboard(store.getOrCreateChat(chatId), undefined, chatId),
       });
       await ctx.answerCallbackQuery({
         text: isSilent ? 'Notifications muted' : 'Notifications unmuted',
@@ -556,7 +663,7 @@ export function registerBotCommands(bot: Bot): void {
       store.setVerbosity(chatId, newVerbosity);
       await ctx.editMessageText(buildSettingsText(store.getOrCreateChat(chatId)), {
         parse_mode: 'HTML',
-        reply_markup: buildMainMenuKeyboard(store.getOrCreateChat(chatId)),
+        reply_markup: buildMainMenuKeyboard(store.getOrCreateChat(chatId), undefined, chatId),
       });
       await ctx.answerCallbackQuery({ text: `Verbosity set to ${newVerbosity}` });
     } else if (data === 'menu:workflow') {
@@ -564,7 +671,7 @@ export function registerBotCommands(bot: Bot): void {
       store.updateChat(chatId, { workflowAlerts: mode });
       await ctx.editMessageText(buildSettingsText(store.getOrCreateChat(chatId)), {
         parse_mode: 'HTML',
-        reply_markup: buildMainMenuKeyboard(store.getOrCreateChat(chatId)),
+        reply_markup: buildMainMenuKeyboard(store.getOrCreateChat(chatId), undefined, chatId),
       });
       await ctx.answerCallbackQuery({ text: `Workflow alerts: ${mode}` });
     } else if (data === 'menu:clear_topics') {
@@ -573,14 +680,14 @@ export function registerBotCommands(bot: Bot): void {
         `✅ All custom topic routes cleared!\n\n` + buildSettingsText(store.getOrCreateChat(chatId)),
         {
           parse_mode: 'HTML',
-          reply_markup: buildMainMenuKeyboard(store.getOrCreateChat(chatId)),
+          reply_markup: buildMainMenuKeyboard(store.getOrCreateChat(chatId), undefined, chatId),
         }
       );
       await ctx.answerCallbackQuery({ text: 'Topic routes cleared' });
     } else if (data === 'menu:refresh') {
       await ctx.editMessageText(buildSettingsText(chat), {
         parse_mode: 'HTML',
-        reply_markup: buildMainMenuKeyboard(chat),
+        reply_markup: buildMainMenuKeyboard(chat, undefined, chatId),
       });
       await ctx.answerCallbackQuery({ text: 'Refreshed' });
     }
