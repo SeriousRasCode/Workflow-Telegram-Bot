@@ -40,6 +40,7 @@ export function buildSettingsText(chat: ChatSettings): string {
   text += `🔔 <b>Enabled Notifications:</b>\n`;
   text += `  ${chat.eventsEnabled.pushes ? '✅' : '❌'} Pushes  `;
   text += `  ${chat.eventsEnabled.prs ? '✅' : '❌'} PRs  `;
+  text += `  ${chat.eventsEnabled.reviews ? '✅' : '❌'} Reviews  `;
   text += `  ${chat.eventsEnabled.issues ? '✅' : '❌'} Issues  `;
   text += `  ${chat.eventsEnabled.releases ? '✅' : '❌'} Releases\n`;
   text += `  ${chat.eventsEnabled.comments ? '✅' : '❌'} Comments  `;
@@ -91,7 +92,9 @@ export function buildEventsMenuKeyboard(chat: ChatSettings): InlineKeyboard {
     .text(`${e.pushes ? '✅' : '❌'} Pushes`, 'toggle_event:pushes')
     .text(`${e.prs ? '✅' : '❌'} Pull Requests`, 'toggle_event:prs')
     .row()
+    .text(`${e.reviews ? '✅' : '❌'} PR Reviews`, 'toggle_event:reviews')
     .text(`${e.issues ? '✅' : '❌'} Issues`, 'toggle_event:issues')
+    .row()
     .text(`${e.comments ? '✅' : '❌'} Comments`, 'toggle_event:comments')
     .row()
     .text(`${e.releases ? '✅' : '❌'} Releases`, 'toggle_event:releases')
