@@ -15,7 +15,7 @@ type TgChat = { id: number; type: string; title?: string; is_forum?: boolean };
 type TgUpdate = { message?: { chat: TgChat; from?: { id: number }; text?: string; message_thread_id?: number }; channel_post?: { chat: TgChat; from?: { id: number }; text?: string; message_thread_id?: number }; callback_query?: { id: string; from: { id: number }; message?: { chat: TgChat; message_id: number; message_thread_id?: number }; data?: string } };
 type Job = { delivery_id: string; chat_id: string; message: string; thread_id: number | null; silent: number; attempts: number };
 
-const events: EventType[] = ['all', 'pushes', 'prs', 'issues', 'comments', 'releases', 'workflows', 'stars', 'forks'];
+const events: EventType[] = ['all', 'pushes', 'prs', 'reviews', 'issues', 'comments', 'releases', 'workflows', 'stars', 'forks'];
 const repoPattern = /^[a-z0-9][a-z0-9-]*\/[a-z0-9._-]+$/i;
 const ownerPattern = /^[a-z0-9][a-z0-9-]*$/i;
 const reply = (body: string, status = 200) => new Response(body, { status });
@@ -46,14 +46,17 @@ async function admin(env: Env, chat: TgChat, userId: number): Promise<boolean> {
 function defaultSettings(chat: TgChat): ChatSettings {
   const now = new Date().toISOString();
   return { chatId: chat.id, chatTitle: chat.title || 'Chat', isForum: Boolean(chat.is_forum), subscribedRepos: [], topics: {}, topicNames: {},
-    eventsEnabled: { pushes: true, prs: true, issues: true, comments: false, releases: true, workflows: false, stars: true, forks: true },
+    eventsEnabled: { pushes: true, prs: true, reviews: false, issues: true, comments: false, releases: true, workflows: false, stars: true, forks: true },
     branchFilter: [], verbosity: 'detailed', workflowAlerts: 'all', workflowFailures: {}, quietHours: null, dailyDigest: null,
     silent: false, createdAt: now, updatedAt: now };
 }
 
 async function getSettings(env: Env, chat: TgChat): Promise<ChatSettings> {
   const row = await env.DB.prepare('SELECT settings FROM chats WHERE chat_id=?').bind(String(chat.id)).first<{ settings: string }>();
-  return row ? JSON.parse(row.settings) : defaultSettings(chat);
+  if (!row) return defaultSettings(chat);
+  const settings = JSON.parse(row.settings) as ChatSettings;
+  settings.eventsEnabled = { ...defaultSettings(chat).eventsEnabled, ...settings.eventsEnabled };
+  return settings;
 }
 
 async function saveSettings(env: Env, settings: ChatSettings): Promise<void> {
