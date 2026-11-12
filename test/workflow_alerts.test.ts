@@ -6,7 +6,7 @@ import { recordWorkflowAlert, selectWorkflowAlert } from '../src/github/workflow
 
 const chat = (): ChatSettings => ({
   chatId: 1, chatTitle: 'Team', subscribedRepos: ['acme/api'], topics: {}, topicNames: {},
-  eventsEnabled: { pushes: true, prs: true, issues: true, comments: false, releases: true, workflows: true, stars: true, forks: true },
+  eventsEnabled: { pushes: true, prs: true, reviews: false, issues: true, comments: false, releases: true, workflows: true, stars: true, forks: true },
   branchFilter: [], verbosity: 'detailed', workflowAlerts: 'failures', workflowFailures: {},
   silent: false, createdAt: '', updatedAt: '',
 });
