@@ -68,6 +68,7 @@ export interface StoreData {
   digestItems?: Record<string, string[]>;
   deliveryStatus?: Record<string, DeliveryStatus[]>;
   failedDeliveries?: Record<string, FailedDelivery[]>;
+  userChatContexts?: Record<string, number>;
   version: number;
 }
 
